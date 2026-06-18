@@ -647,6 +647,8 @@ def _build_box_html_with_anchors(
     src_df: pd.DataFrame,
     fail_label: str,
     page_title: str,
+    show_spec: bool = True,
+    cf_device_map: "dict | None" = None,
 ) -> "str | None":
     """
     Build a standalone HTML page with one Plotly box-plot figure per param.
@@ -703,15 +705,16 @@ def _build_box_html_with_anchors(
                 point_ids = td["Parameter"].str.replace("PID-", "", regex=False)
                 id_label  = "PID"
             elif "ZipFile" in td.columns:
-                point_ids = td["ZipFile"]
-                id_label  = "ZipFile"
+                _dm = cf_device_map or {}
+                point_ids = [_dm.get(str(zf), f"*{i + 1}")
+                             for i, zf in enumerate(td["ZipFile"])]
+                id_label  = "PID"
             else:
                 point_ids = pd.Series([str(i + 1) for i in range(len(td))])
                 id_label  = "Index"
 
             hover_texts = [
-                f"<b>Tester:</b> {tester}<br>"
-                f"<b>{id_label}:</b> {pid}<br>"
+                f"<b>PID:</b> {pid}<br>"
                 f"<b>ArmNo:</b> {arm}<br>"
                 f"<b>Value:</b> {val:.6g}"
                 for pid, arm, val in zip(point_ids, td["M_Handler-ArmNo"], td[col])
@@ -727,22 +730,23 @@ def _build_box_html_with_anchors(
                 showlegend=False,
             ))
 
-        fig.add_hline(y=low_l, line_dash="dash", line_color=_LOW_COLOUR, line_width=1.5,
-                      annotation_text=f"LowL = {low_l:g}",
-                      annotation_font_color=_LOW_COLOUR,
-                      annotation_position="bottom right")
-        fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines",
-                                  name=f"--- LowL = {low_l:g}",
-                                  line=dict(color=_LOW_COLOUR, dash="dash", width=1.5),
-                                  showlegend=True))
-        fig.add_hline(y=high_l, line_dash="dash", line_color=_HIGH_COLOUR, line_width=1.5,
-                      annotation_text=f"HighL = {high_l:g}",
-                      annotation_font_color=_HIGH_COLOUR,
-                      annotation_position="top right")
-        fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines",
-                                  name=f"--- HighL = {high_l:g}",
-                                  line=dict(color=_HIGH_COLOUR, dash="dash", width=1.5),
-                                  showlegend=True))
+        if show_spec:
+            fig.add_hline(y=low_l, line_dash="dash", line_color=_LOW_COLOUR, line_width=1.5,
+                          annotation_text=f"LowL = {low_l:g}",
+                          annotation_font_color=_LOW_COLOUR,
+                          annotation_position="bottom right")
+            fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines",
+                                      name=f"--- LowL = {low_l:g}",
+                                      line=dict(color=_LOW_COLOUR, dash="dash", width=1.5),
+                                      showlegend=True))
+            fig.add_hline(y=high_l, line_dash="dash", line_color=_HIGH_COLOUR, line_width=1.5,
+                          annotation_text=f"HighL = {high_l:g}",
+                          annotation_font_color=_HIGH_COLOUR,
+                          annotation_position="top right")
+            fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines",
+                                      name=f"--- HighL = {high_l:g}",
+                                      line=dict(color=_HIGH_COLOUR, dash="dash", width=1.5),
+                                      showlegend=True))
 
         fig.update_layout(
             title=dict(
@@ -938,8 +942,7 @@ def _build_box_page(
                 id_label  = "Index"
 
             hover_texts = [
-                f"<b>Tester:</b> {tester}<br>"
-                f"<b>{id_label}:</b> {pid}<br>"
+                f"<b>PID:</b> {pid}<br>"
                 f"<b>ArmNo:</b> {arm}<br>"
                 f"<b>Value:</b> {val:.6g}"
                 for pid, arm, val in zip(point_ids, td["M_Handler-ArmNo"], td[col])
@@ -1048,6 +1051,16 @@ def main():
     N = len(param_specs)
     print(f"GuLog_FailedSummary: {len(summary_df)} failure rows -> {N} unique parameter(s) to plot\n")
 
+    # Build ZipFile -> device-ID string from CorrFactor rows
+    _cf_mask = summary_df["FailType"].astype(str).str.startswith("Failed GU Corr-factor")
+    cf_device_map = (
+        summary_df[_cf_mask & summary_df["Device"].fillna("").astype(str).ne("")]
+        .drop_duplicates("ZipFile")
+        .set_index("ZipFile")["Device"]
+        .astype(str)
+        .to_dict()
+    ) if "Device" in summary_df.columns else {}
+
     cf_df = _load_concat_csv(_CF_CSV)
     ve_df = _load_concat_csv(_VE_CSV)
     cr_df = _load_concat_csv(_CR_CSV)
@@ -1066,7 +1079,7 @@ def main():
 
     outputs = []
 
-    def _run_pages(specs, src_df, fail_label, tag):
+    def _run_pages(specs, src_df, fail_label, tag, show_spec=True):
         """Paginate _build_box_html_with_anchors and write HTML files for one data set."""
         if specs.empty:
             print(f"No parameters to plot for {tag}.\n")
@@ -1076,7 +1089,8 @@ def main():
         for page_i, chunk in enumerate(_chunked(specs, _PARAMS_PER_PAGE), start=1):
             title = (f"Failed GU Parameters — {tag} Data — Box Plot"
                      f"  (Page {page_i} / {n_pages})")
-            html = _build_box_html_with_anchors(chunk, src_df, fail_label, title)
+            html = _build_box_html_with_anchors(chunk, src_df, fail_label, title, show_spec=show_spec,
+                                                 cf_device_map=cf_device_map)
             if html is not None:
                 out_path = os.path.join(_BOXPLOT_DIR,
                                         f"FailedParams_{tag}_BoxPlot_p{page_i:02d}.html")
@@ -1089,11 +1103,11 @@ def main():
     _run_pages(param_specs, cf_df, "CorrFactor", "CorrFactor")
     _run_pages(param_specs, ve_df, "Verify",     "Verify")
     if not cr_df.empty:
-        _run_pages(param_specs, cr_df, "CorrRaw", "CorrRaw")
+        _run_pages(param_specs, cr_df, "CorrRaw", "CorrRaw", show_spec=False)
     else:
         print("No CorrRaw data to plot.\n")
     if not vr_df.empty:
-        _run_pages(param_specs, vr_df, "VryRaw", "VryRaw")
+        _run_pages(param_specs, vr_df, "VryRaw", "VryRaw", show_spec=False)
     else:
         print("No VryRaw data to plot.\n")
 

@@ -202,6 +202,9 @@ FAIL_CF_RE = re.compile(
     r"HighL:\s*(\S+)"
 )
 
+# Device context line preceding Corr-factor failures
+DEVICE_RE = re.compile(r"GU Device #(\d+) being run")
+
 # ── main processing ────────────────────────────────────────────────────────────
 zip_files = sorted(
     f for f in os.listdir(GUFILE_DIR) if f.lower().endswith(".zip")
@@ -277,18 +280,30 @@ for zip_name in zip_files:
             meta  = parse_meta(lines)
             in_messages = False
             fail_count  = 0
+            current_devices: list[str] = []
+            cf_devices_used = False
             for line in lines:
                 if "Messages logged during GU Calibration" in line:
                     in_messages = True
                 if in_messages:
+                    m_dev = DEVICE_RE.search(line)
+                    if m_dev:
+                        if cf_devices_used:
+                            current_devices.clear()
+                            cf_devices_used = False
+                        current_devices.append("#" + m_dev.group(1))
+                        continue
                     m_ve = FAIL_VE_RE.search(line)
                     m_cf = FAIL_CF_RE.search(line)
                     if m_ve:
                         site, device, test_num, param_name, lowl, error, highl = m_ve.groups()
                         fail_type = "Failed GU Verification limits"
+                        current_devices.clear()
+                        cf_devices_used = False
                     elif m_cf:
                         site, test_num, param_name, lowl, error, highl = m_cf.groups()
-                        device = ""
+                        device = ",".join(current_devices)
+                        cf_devices_used = True
                         fail_type = "Failed GU Corr-factor limits"
                     else:
                         continue

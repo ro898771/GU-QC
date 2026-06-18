@@ -128,9 +128,10 @@ def get_corr_data(cf_df: pd.DataFrame, col: str,
     if sub.empty:
         return pd.DataFrame(columns=["TesterName", "ZipFile", "Device", "M_Handler-ArmNo", col])
 
-    sub["Device"] = sub["ZipFile"].apply(
-        lambda zf: ", ".join(zip_device_map.get(str(zf), ["N/A"]))
-    )
+    sub["Device"] = [
+        zip_device_map.get(str(zf), f"*{i + 1}")
+        for i, zf in enumerate(sub["ZipFile"])
+    ]
     if not arm_present:
         sub["M_Handler-ArmNo"] = "N/A"
     return sub
@@ -330,6 +331,7 @@ def _build_html_with_anchors(
     zip_device_map: dict,
     page_title: str,
     is_corr: bool,
+    show_spec: bool = True,
 ) -> "str | None":
     """
     Build a standalone HTML page with one Plotly figure per param.
@@ -376,14 +378,12 @@ def _build_html_with_anchors(
             x_idx  = list(range(1, len(td) + 1))
             hover  = [
                 (
-                    f"<b>Tester:</b> {tester}<br>"
-                    f"<b>ZipFile:</b> {zf}<br>"
-                    f"<b>Device:</b> {dev}<br>"
+                    f"<b>PID:</b> {dev}<br>"
                     f"<b>ArmNo:</b> {arm}<br>"
                     f"<b>Value:</b> {val:.6g}"
                 )
-                for zf, dev, arm, val in zip(
-                    td["ZipFile"], td["Device"], td["M_Handler-ArmNo"], td[col]
+                for dev, arm, val in zip(
+                    td["Device"], td["M_Handler-ArmNo"], td[col]
                 )
             ]
             fig.add_trace(go.Scatter(
@@ -398,22 +398,23 @@ def _build_html_with_anchors(
             ))
             shown_testers.add(tester)
 
-        fig.add_hline(y=low_l, line_dash="dash", line_color=LOW_COLOUR, line_width=1.5,
-                      annotation_text=f"LowL = {low_l:g}",
-                      annotation_font_color=LOW_COLOUR,
-                      annotation_position="bottom right")
-        fig.add_hline(y=high_l, line_dash="dash", line_color=HIGH_COLOUR, line_width=1.5,
-                      annotation_text=f"HighL = {high_l:g}",
-                      annotation_font_color=HIGH_COLOUR,
-                      annotation_position="top right")
-        fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines",
-                                  name="--- LowL spec", legendgroup="__lowl__",
-                                  showlegend=True,
-                                  line=dict(color=LOW_COLOUR, dash="dash", width=1.5)))
-        fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines",
-                                  name="--- HighL spec", legendgroup="__highl__",
-                                  showlegend=True,
-                                  line=dict(color=HIGH_COLOUR, dash="dash", width=1.5)))
+        if show_spec:
+            fig.add_hline(y=low_l, line_dash="dash", line_color=LOW_COLOUR, line_width=1.5,
+                          annotation_text=f"LowL = {low_l:g}",
+                          annotation_font_color=LOW_COLOUR,
+                          annotation_position="bottom right")
+            fig.add_hline(y=high_l, line_dash="dash", line_color=HIGH_COLOUR, line_width=1.5,
+                          annotation_text=f"HighL = {high_l:g}",
+                          annotation_font_color=HIGH_COLOUR,
+                          annotation_position="top right")
+            fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines",
+                                      name="--- LowL spec", legendgroup="__lowl__",
+                                      showlegend=True,
+                                      line=dict(color=LOW_COLOUR, dash="dash", width=1.5)))
+            fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines",
+                                      name="--- HighL spec", legendgroup="__highl__",
+                                      showlegend=True,
+                                      line=dict(color=HIGH_COLOUR, dash="dash", width=1.5)))
 
         x_label = "Session Index" if is_corr else "Measurement Index"
         fig.update_layout(
@@ -568,14 +569,21 @@ def main():
     if not vr_df.empty:
         print(f"  GuRawData       : {len(vr_df):,} data rows")
 
-    # Build ZipFile -> device ID mapping from GuVrfyError
-    zip_device_map = build_zip_device_map(ve_df)
+    # Build ZipFile -> device-ID string from GuLog_FailedSummary CorrFactor rows
+    cf_mask = summary_df["FailType"].astype(str).str.startswith("Failed GU Corr-factor")
+    zip_device_map = (
+        summary_df[cf_mask & summary_df["Device"].fillna("").astype(str).ne("")]
+        .drop_duplicates("ZipFile")
+        .set_index("ZipFile")["Device"]
+        .astype(str)
+        .to_dict()
+    ) if "Device" in summary_df.columns else {}
     print(f"  ZipFile->Device map : {len(zip_device_map)} session(s)\n")
 
     os.makedirs(PLOT_DIR, exist_ok=True)
     outputs_opened = []
 
-    def _save_pages(specs, src_cf, src_ve, is_corr, tag, title_prefix):
+    def _save_pages(specs, src_cf, src_ve, is_corr, tag, title_prefix, show_spec=True):
         """Paginate and write one HTML-with-anchors file per page into PLOT_DIR."""
         if specs.empty:
             print(f"No parameters to plot for {tag}.\n")
@@ -589,6 +597,7 @@ def main():
                 zip_device_map=zip_device_map,
                 page_title=f"{title_prefix}  (Page {page_i} / {n_pages})",
                 is_corr=is_corr,
+                show_spec=show_spec,
             )
             if html is not None:
                 fname = f"FailedParams_{tag}_LinePlot_p{page_i:02d}.html"
@@ -607,13 +616,13 @@ def main():
 
     if not cr_df.empty:
         _save_pages(param_specs, pd.DataFrame(), cr_df, False, "CorrRaw",
-                    "Failed GU Parameters — CorrRaw Data — Line Plot")
+                    "Failed GU Parameters — CorrRaw Data — Line Plot", show_spec=False)
     else:
         print("No CorrRaw data available.\n")
 
     if not vr_df.empty:
         _save_pages(param_specs, pd.DataFrame(), vr_df, False, "VryRaw",
-                    "Failed GU Parameters — VryRaw Data — Line Plot")
+                    "Failed GU Parameters — VryRaw Data — Line Plot", show_spec=False)
     else:
         print("No VryRaw data available.\n")
 
