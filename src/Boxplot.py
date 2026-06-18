@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -636,6 +637,225 @@ def _chunked(df: pd.DataFrame, size: int):
         yield df.iloc[i : i + size].reset_index(drop=True)
 
 
+def _safe_id(name: str) -> str:
+    """Return a valid HTML element ID from a parameter name."""
+    return re.sub(r"[^A-Za-z0-9_-]", "_", name)
+
+
+def _build_box_html_with_anchors(
+    param_specs: pd.DataFrame,
+    src_df: pd.DataFrame,
+    fail_label: str,
+    page_title: str,
+) -> "str | None":
+    """
+    Build a standalone HTML page with one Plotly box-plot figure per param.
+    Each section gets <div id="{safe_id}"> for direct URL-fragment navigation.
+    Returns None if no params are plottable.
+    """
+    import plotly.graph_objects as go
+
+    if param_specs.empty:
+        return None
+
+    N        = len(param_specs)
+    sections: list = []
+    tester_colour: dict = {}
+    colour_idx = 0
+
+    for row_i, (_, spec) in enumerate(param_specs.iterrows(), start=1):
+        param_name = spec["ParamName"]
+        low_l      = float(spec["LowL"])
+        high_l     = float(spec["HighL"])
+
+        if src_df.empty:
+            print(f"  [{row_i}/{N}] SKIP (empty source): {param_name[:70]}")
+            continue
+        col = _find_col(src_df, param_name)
+        if col is None:
+            print(f"  [{row_i}/{N}] SKIP (column not found): {param_name[:70]}")
+            continue
+
+        extra_cols = [c for c in ("Parameter", "ZipFile", "M_Handler-ArmNo") if c in src_df.columns]
+        sub = src_df[["TesterName", col] + extra_cols].copy()
+        sub[col] = pd.to_numeric(sub[col], errors="coerce")
+        sub = sub.dropna(subset=[col])
+        if "M_Handler-ArmNo" not in sub.columns:
+            sub["M_Handler-ArmNo"] = "N/A"
+        if sub.empty:
+            print(f"  [{row_i}/{N}] SKIP (no data): {param_name[:70]}")
+            continue
+
+        tester_names = sorted(sub["TesterName"].unique())
+        for t in tester_names:
+            if t not in tester_colour:
+                tester_colour[t] = _TESTER_PALETTE[colour_idx % len(_TESTER_PALETTE)]
+                colour_idx += 1
+
+        fig = go.Figure()
+
+        for tester in tester_names:
+            colour = tester_colour[tester]
+            td     = sub[sub["TesterName"] == tester].reset_index(drop=True)
+
+            if ("Parameter" in td.columns
+                    and td["Parameter"].astype(str).str.startswith("PID-").any()):
+                point_ids = td["Parameter"].str.replace("PID-", "", regex=False)
+                id_label  = "PID"
+            elif "ZipFile" in td.columns:
+                point_ids = td["ZipFile"]
+                id_label  = "ZipFile"
+            else:
+                point_ids = pd.Series([str(i + 1) for i in range(len(td))])
+                id_label  = "Index"
+
+            hover_texts = [
+                f"<b>Tester:</b> {tester}<br>"
+                f"<b>{id_label}:</b> {pid}<br>"
+                f"<b>ArmNo:</b> {arm}<br>"
+                f"<b>Value:</b> {val:.6g}"
+                for pid, arm, val in zip(point_ids, td["M_Handler-ArmNo"], td[col])
+            ]
+            fig.add_trace(go.Box(
+                y=td[col].tolist(), name=tester,
+                boxpoints="all", jitter=0.4, pointpos=0,
+                marker=dict(color=colour, size=6, opacity=0.6),
+                line=dict(color=colour),
+                fillcolor="rgba(255,255,255,0.6)",
+                text=hover_texts,
+                hovertemplate="%{text}<extra></extra>",
+                showlegend=False,
+            ))
+
+        fig.add_hline(y=low_l, line_dash="dash", line_color=_LOW_COLOUR, line_width=1.5,
+                      annotation_text=f"LowL = {low_l:g}",
+                      annotation_font_color=_LOW_COLOUR,
+                      annotation_position="bottom right")
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines",
+                                  name=f"--- LowL = {low_l:g}",
+                                  line=dict(color=_LOW_COLOUR, dash="dash", width=1.5),
+                                  showlegend=True))
+        fig.add_hline(y=high_l, line_dash="dash", line_color=_HIGH_COLOUR, line_width=1.5,
+                      annotation_text=f"HighL = {high_l:g}",
+                      annotation_font_color=_HIGH_COLOUR,
+                      annotation_position="top right")
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines",
+                                  name=f"--- HighL = {high_l:g}",
+                                  line=dict(color=_HIGH_COLOUR, dash="dash", width=1.5),
+                                  showlegend=True))
+
+        fig.update_layout(
+            title=dict(
+                text=f"<b>[{fail_label}]  {param_name}</b>",
+                x=0.5, xanchor="center", font=dict(size=16),
+            ),
+            height=600,
+            yaxis_title="Measured Value",
+            xaxis_title="TesterName",
+            template="plotly_white",
+            legend=dict(
+                title=dict(text="<b>Spec Limits</b>"),
+                orientation="v", x=1.01, y=1.0,
+                xanchor="left", yanchor="top",
+                bordercolor="#cccccc", borderwidth=1,
+                font=dict(size=12),
+            ),
+            hovermode="closest",
+            margin=dict(l=80, r=200, t=80, b=80),
+        )
+
+        safe_id    = _safe_id(param_name)
+        include_js = "cdn" if not sections else False
+        fig_div    = fig.to_html(include_plotlyjs=include_js, full_html=False,
+                                  div_id=f"bp-{safe_id}")
+        print(f"  [{row_i}/{N}] OK  {len(tester_names)} tester(s)  {len(sub)} point(s)   {param_name[:70]}")
+        sections.append((safe_id, param_name, fig_div))
+
+    if not sections:
+        return None
+
+    modal_rows = "".join(
+        f'<tr><td>{i}</td><td><a href="#{s}" onclick="closeModal()">{n}</a></td></tr>'
+        for i, (s, n, _) in enumerate(sections, start=1)
+    )
+    body = "".join(
+        f'<div id="{s}" class="ps">'
+        f'<div class="bk"><a href="#top">&#8593; Top</a></div>'
+        f'{h}</div>'
+        for s, _, h in sections
+    )
+    n_params = len(sections)
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{page_title}</title>
+<style>
+  body{{font-family:"Segoe UI",Arial,sans-serif;background:#f0f2f5;margin:0;padding:16px}}
+  .top-bar{{display:flex;align-items:center;gap:12px;margin-bottom:14px;
+            background:#2c3e50;padding:8px 14px;border-radius:6px;position:sticky;top:0;z-index:99}}
+  h1{{font-size:15px;color:#fff;flex:1;margin:0}}
+  .btn-nav{{background:#1a6b9a;color:#fff;border:none;padding:5px 14px;
+            border-radius:4px;cursor:pointer;font-size:12px;white-space:nowrap}}
+  .btn-nav:hover{{background:#135580}}
+  .ps{{background:#fff;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.1);
+       margin-bottom:20px;padding:8px 8px 4px}}
+  .bk{{text-align:right;font-size:11px;padding:2px 6px 4px}}
+  .bk a{{color:#aaa;text-decoration:none}}.bk a:hover{{color:#2c3e50}}
+  /* Modal */
+  #pmodal{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);
+           z-index:999;align-items:center;justify-content:center}}
+  #pmodal.open{{display:flex}}
+  #pmodal-box{{background:#fff;padding:28px;border-radius:8px;
+               width:80vw;max-width:900px;max-height:85vh;overflow:auto;
+               box-shadow:0 4px 24px rgba(0,0,0,.25)}}
+  #pmodal-box h2{{font-size:15px;color:#2c3e50;margin-bottom:12px}}
+  #pmodal-box table{{border-collapse:collapse;width:100%;font-size:13px}}
+  #pmodal-box th{{background:#2c3e50;color:#fff;padding:7px 14px;text-align:left}}
+  #pmodal-box td{{padding:6px 14px;border-bottom:1px solid #eee}}
+  #pmodal-box tr:last-child td{{border-bottom:none}}
+  #pmodal-box tr:nth-child(even) td{{background:#fafafa}}
+  #pmodal-box a{{color:#2980b9;text-decoration:none;font-weight:600}}
+  #pmodal-box a:hover{{text-decoration:underline}}
+  .modal-close{{float:right;background:#888;color:#fff;border:none;
+                padding:4px 10px;border-radius:3px;cursor:pointer;font-size:12px}}
+  .modal-close:hover{{background:#555}}
+</style>
+</head>
+<body id="top">
+<div class="top-bar">
+  <h1>{page_title}</h1>
+  <button class="btn-nav" onclick="document.getElementById('pmodal').classList.add('open')">
+    &#9776; Parameters ({n_params})
+  </button>
+</div>
+
+<!-- Parameters modal -->
+<div id="pmodal" onclick="if(event.target===this)closeModal()">
+  <div id="pmodal-box">
+    <button class="modal-close" onclick="closeModal()">&#10005; Close</button>
+    <h2>Parameters on this page ({n_params})</h2>
+    <table>
+      <thead><tr><th>#</th><th>Parameter Name</th></tr></thead>
+      <tbody>{modal_rows}</tbody>
+    </table>
+  </div>
+</div>
+
+{body}
+<script>
+function closeModal(){{document.getElementById('pmodal').classList.remove('open');}}
+// Auto-open modal if no anchor is targeted on load
+window.addEventListener('load', function(){{
+  if (!window.location.hash) {{
+    document.getElementById('pmodal').classList.add('open');
+  }}
+}});
+</script>
+</body>
+</html>"""
+
+
 def _build_box_page(
     param_specs: pd.DataFrame,
     src_df: pd.DataFrame,
@@ -847,7 +1067,7 @@ def main():
     outputs = []
 
     def _run_pages(specs, src_df, fail_label, tag):
-        """Paginate _build_box_page and write HTML files for one data set."""
+        """Paginate _build_box_html_with_anchors and write HTML files for one data set."""
         if specs.empty:
             print(f"No parameters to plot for {tag}.\n")
             return
@@ -856,11 +1076,12 @@ def main():
         for page_i, chunk in enumerate(_chunked(specs, _PARAMS_PER_PAGE), start=1):
             title = (f"Failed GU Parameters — {tag} Data — Box Plot"
                      f"  (Page {page_i} / {n_pages})")
-            fig = _build_box_page(chunk, src_df, fail_label, title)
-            if fig is not None:
+            html = _build_box_html_with_anchors(chunk, src_df, fail_label, title)
+            if html is not None:
                 out_path = os.path.join(_BOXPLOT_DIR,
                                         f"FailedParams_{tag}_BoxPlot_p{page_i:02d}.html")
-                fig.write_html(out_path, include_plotlyjs="cdn")
+                with open(out_path, "w", encoding="utf-8") as fh:
+                    fh.write(html)
                 print(f"  Saved -> {out_path}\n")
                 outputs.append(out_path)
 

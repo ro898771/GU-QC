@@ -79,12 +79,18 @@ def generate_summary_html(plot_type: str) -> None:
         ensure_ascii=False,
     )
 
+    import re
+
+    def _safe_id(name: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_-]", "_", str(name))
+
     # Summary.html lives inside Plot/ — links are same-directory
-    def _link(tag: str, page: int, label: str) -> str:
-        fname = f"FailedParams_{tag}_{plot_type}_p{page:02d}.html"
+    def _link(tag: str, page: int, label: str, param: str) -> str:
+        fname  = f"FailedParams_{tag}_{plot_type}_p{page:02d}.html"
+        anchor = _safe_id(param)
         if not os.path.exists(os.path.join(PLOT_DIR, fname)):
             return '<span class="na">—</span>'
-        return f'<a href="{fname}" target="_blank">{label} p{page}</a>'
+        return f'<a href="{fname}#{anchor}" target="_blank">{label} p{page}</a>'
 
     def _esc(v) -> str:
         return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -103,10 +109,10 @@ def generate_summary_html(plot_type: str) -> None:
         page      = all_pages.get((param, fail_type), 1)
 
         # All 4 link columns shown for every row; os.path.exists check handles missing files
-        col_corr_factor  = _link("CorrFactor", page, "CorrFactor")
-        col_verify_error = _link("Verify",     page, "Verify")
-        col_raw_b4final  = _link("CorrRaw",    page, "CorrRaw")
-        col_raw_b4vry    = _link("VryRaw",     page, "VryRaw")
+        col_corr_factor  = _link("CorrFactor", page, "CorrFactor", param)
+        col_verify_error = _link("Verify",     page, "Verify",     param)
+        col_raw_b4final  = _link("CorrRaw",    page, "CorrRaw",    param)
+        col_raw_b4vry    = _link("VryRaw",     page, "VryRaw",     param)
 
         rows_html.append(
             f"<tr>"
