@@ -1,6 +1,6 @@
 """
-plot_failures.py
-================
+LinePlot.py
+===========
 Reads  result/GuLog_FailedSummary.csv  and generates two interactive Plotly HTML files:
 
   result/FailedParams_CorrFactor_Plot.html   -- Failed GU Corr-factor limits
@@ -33,11 +33,13 @@ from plotly.subplots import make_subplots
 BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULT_DIR = os.path.join(BASE_DIR, "result")
 
-SUMMARY_CSV  = os.path.join(RESULT_DIR, "GuLog_FailedSummary.csv")
-CF_CSV       = os.path.join(RESULT_DIR, "GuCorrFactor_ALL_CONCAT.csv")
-VE_CSV       = os.path.join(RESULT_DIR, "GuVrfyError_ALL_CONCAT.csv")
-OUT_CF_HTML  = os.path.join(RESULT_DIR, "FailedParams_CorrFactor_Plot.html")
-OUT_VE_HTML  = os.path.join(RESULT_DIR, "FailedParams_Verify_Plot.html")
+SUMMARY_CSV     = os.path.join(RESULT_DIR, "GuLog_FailedSummary.csv")
+CF_CSV          = os.path.join(RESULT_DIR, "GuCorrFactor_ALL_CONCAT.csv")
+VE_CSV          = os.path.join(RESULT_DIR, "GuVrfyError_ALL_CONCAT.csv")
+CR_CSV          = os.path.join(RESULT_DIR, "Corr_GuCorrRawData_ALL_CONCAT.csv")
+VR_CSV          = os.path.join(RESULT_DIR, "Vry_GuRawData_ALL_CONCAT.csv")
+PLOT_DIR        = os.path.join(RESULT_DIR, "Plot")
+PARAMS_PER_PAGE = 20
 
 # ── Visual constants ─────────────────────────────────────────────────────────────
 TESTER_PALETTE  = pc.qualitative.Plotly   # 10 distinct colours
@@ -115,29 +117,37 @@ def get_corr_data(cf_df: pd.DataFrame, col: str,
     The Device column contains all device IDs for that session as a
     comma-separated string (e.g. '7000018, 7000019, 7000020, 7000026'),
     shown in the hover tooltip.
-    Returns DataFrame with columns: TesterName, ZipFile, Device, <col>.
+    Returns DataFrame with columns: TesterName, ZipFile, Device, M_Handler-ArmNo, <col>.
     """
-    sub = cf_df[["TesterName", "ZipFile", col]].copy()
+    arm_present = "M_Handler-ArmNo" in cf_df.columns
+    keep = ["TesterName", "ZipFile"] + (["M_Handler-ArmNo"] if arm_present else []) + [col]
+    sub = cf_df[keep].copy()
     sub[col] = pd.to_numeric(sub[col], errors="coerce")
     sub = sub.dropna(subset=[col]).reset_index(drop=True)
     if sub.empty:
-        return pd.DataFrame(columns=["TesterName", "ZipFile", "Device", col])
+        return pd.DataFrame(columns=["TesterName", "ZipFile", "Device", "M_Handler-ArmNo", col])
 
     sub["Device"] = sub["ZipFile"].apply(
         lambda zf: ", ".join(zip_device_map.get(str(zf), ["N/A"]))
     )
+    if not arm_present:
+        sub["M_Handler-ArmNo"] = "N/A"
     return sub
 
 
 def get_verify_data(ve_df: pd.DataFrame, col: str) -> pd.DataFrame:
     """
     Extract Verify rows for *col*, stripping 'PID-' from the Parameter column.
-    Returns DataFrame with columns: TesterName, ZipFile, Device, <col>.
+    Returns DataFrame with columns: TesterName, ZipFile, Device, M_Handler-ArmNo, <col>.
     """
-    sub = ve_df[["TesterName", "ZipFile", "Parameter", col]].copy()
+    arm_present = "M_Handler-ArmNo" in ve_df.columns
+    keep = ["TesterName", "ZipFile", "Parameter"] + (["M_Handler-ArmNo"] if arm_present else []) + [col]
+    sub = ve_df[keep].copy()
     sub[col] = pd.to_numeric(sub[col], errors="coerce")
     sub = sub.dropna(subset=[col])
     sub["Device"] = sub["Parameter"].str.replace("PID-", "", regex=False)
+    if not arm_present:
+        sub["M_Handler-ArmNo"] = "N/A"
     return sub.drop(columns=["Parameter"]).reset_index(drop=True)
 
 
@@ -214,9 +224,12 @@ def build_figure(param_specs: pd.DataFrame,
                     f"<b>Tester:</b> {tester}<br>"
                     f"<b>ZipFile:</b> {zf}<br>"
                     f"<b>Device:</b> {dev}<br>"
+                    f"<b>ArmNo:</b> {arm}<br>"
                     f"<b>Value:</b> {val:.6g}"
                 )
-                for zf, dev, val in zip(td["ZipFile"], td["Device"], td[col])
+                for zf, dev, arm, val in zip(
+                    td["ZipFile"], td["Device"], td["M_Handler-ArmNo"], td[col]
+                )
             ]
 
             fig.add_trace(
@@ -298,89 +311,102 @@ def build_figure(param_specs: pd.DataFrame,
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────────
-if not os.path.exists(SUMMARY_CSV):
-    print(f"ERROR: {SUMMARY_CSV} not found.\nRun main.py first to generate result files.")
-    sys.exit(1)
+def _chunked_df(df: pd.DataFrame, size: int):
+    """Yield successive DataFrame slices of `size` rows."""
+    for i in range(0, len(df), size):
+        yield df.iloc[i : i + size].reset_index(drop=True)
 
-with open(SUMMARY_CSV, encoding="utf-8") as _f:
-    _peek = _f.readline().strip()
 
-if _peek.startswith("All Pass"):
-    print("GuLog_FailedSummary.csv reports All Pass -- nothing to plot.")
-    sys.exit(0)
+def main():
+    if not os.path.exists(SUMMARY_CSV):
+        print(f"ERROR: {SUMMARY_CSV} not found.\nRun main.py first to generate result files.")
+        sys.exit(1)
 
-summary_df = pd.read_csv(SUMMARY_CSV)
+    with open(SUMMARY_CSV, encoding="utf-8") as _f:
+        _peek = _f.readline().strip()
 
-# One spec entry per unique (ParamName, FailType) -- first LowL / HighL wins
-param_specs = (
-    summary_df
-    .groupby(["ParamName", "FailType"], sort=False)
-    .agg(LowL=("LowL", "first"), HighL=("HighL", "first"))
-    .reset_index()
-)
+    if _peek.startswith("All Pass"):
+        print("GuLog_FailedSummary.csv reports All Pass -- nothing to plot.")
+        sys.exit(0)
 
-N = len(param_specs)
-print(f"GuLog_FailedSummary: {len(summary_df)} failure rows -> {N} unique parameter(s) to plot\n")
+    summary_df = pd.read_csv(SUMMARY_CSV)
 
-# Load concat data files
-cf_df = load_concat_csv(CF_CSV)
-ve_df = load_concat_csv(VE_CSV)
-
-if not cf_df.empty:
-    print(f"  GuCorrFactor : {len(cf_df):,} data rows")
-if not ve_df.empty:
-    print(f"  GuVrfyError  : {len(ve_df):,} data rows")
-
-# Build ZipFile -> device ID mapping from GuVrfyError
-zip_device_map = build_zip_device_map(ve_df)
-print(f"  ZipFile->Device map : {len(zip_device_map)} session(s)\n")
-
-# Split parameters by FailType
-cf_specs = param_specs[param_specs["FailType"].str.contains("Corr")].reset_index(drop=True)
-ve_specs  = param_specs[~param_specs["FailType"].str.contains("Corr")].reset_index(drop=True)
-
-outputs_opened = []
-
-# ── CorrFactor HTML ───────────────────────────────────────────────────────────────
-if not cf_specs.empty:
-    print(f"=== CorrFactor: {len(cf_specs)} parameter(s) ===")
-    cf_fig = build_figure(
-        param_specs=cf_specs,
-        cf_df=cf_df, ve_df=ve_df,
-        zip_device_map=zip_device_map,
-        page_title="Failed GU Corr-factor Parameters -- Measurement Trace",
-        is_corr=True,
+    # One spec entry per unique (ParamName, FailType) -- first LowL / HighL wins
+    param_specs = (
+        summary_df
+        .groupby(["ParamName", "FailType"], sort=False)
+        .agg(LowL=("LowL", "first"), HighL=("HighL", "first"))
+        .reset_index()
     )
-    if cf_fig is not None:
-        cf_fig.write_html(OUT_CF_HTML, include_plotlyjs="cdn")
-        print(f"  Saved -> {OUT_CF_HTML}\n")
-        outputs_opened.append(OUT_CF_HTML)
+
+    N = len(param_specs)
+    print(f"GuLog_FailedSummary: {len(summary_df)} failure rows -> {N} unique parameter(s) to plot\n")
+
+    # Load concat data files
+    cf_df = load_concat_csv(CF_CSV)
+    ve_df = load_concat_csv(VE_CSV)
+    cr_df = load_concat_csv(CR_CSV)
+    vr_df = load_concat_csv(VR_CSV)
+
+    if not cf_df.empty:
+        print(f"  GuCorrFactor    : {len(cf_df):,} data rows")
+    if not ve_df.empty:
+        print(f"  GuVrfyError     : {len(ve_df):,} data rows")
+    if not cr_df.empty:
+        print(f"  GuCorrRawData   : {len(cr_df):,} data rows")
+    if not vr_df.empty:
+        print(f"  GuRawData       : {len(vr_df):,} data rows")
+
+    # Build ZipFile -> device ID mapping from GuVrfyError
+    zip_device_map = build_zip_device_map(ve_df)
+    print(f"  ZipFile->Device map : {len(zip_device_map)} session(s)\n")
+
+    os.makedirs(PLOT_DIR, exist_ok=True)
+    outputs_opened = []
+
+    def _save_pages(specs, src_cf, src_ve, is_corr, tag, title_prefix):
+        """Paginate build_figure calls and write one HTML per page into PLOT_DIR."""
+        if specs.empty:
+            print(f"No parameters to plot for {tag}.\n")
+            return
+        n_pages = -(-len(specs) // PARAMS_PER_PAGE)
+        print(f"=== {tag}: {len(specs)} parameter(s), {n_pages} page(s) ===")
+        for page_i, chunk in enumerate(_chunked_df(specs, PARAMS_PER_PAGE), start=1):
+            fig = build_figure(
+                param_specs=chunk,
+                cf_df=src_cf, ve_df=src_ve,
+                zip_device_map=zip_device_map,
+                page_title=f"{title_prefix}  (Page {page_i} / {n_pages})",
+                is_corr=is_corr,
+            )
+            if fig is not None:
+                fname = f"FailedParams_{tag}_LinePlot_p{page_i:02d}.html"
+                out   = os.path.join(PLOT_DIR, fname)
+                fig.write_html(out, include_plotlyjs="cdn")
+                print(f"  Saved -> {out}")
+                outputs_opened.append(out)
+        print()
+
+    # All 4 plot sets include every failed parameter regardless of FailType
+    _save_pages(param_specs, cf_df,          ve_df, True,  "CorrFactor",
+                "Failed GU Parameters — Corr-factor Data — Line Plot")
+    _save_pages(param_specs, cf_df,          ve_df, False, "Verify",
+                "Failed GU Parameters — Verification Data — Line Plot")
+
+    if not cr_df.empty:
+        _save_pages(param_specs, pd.DataFrame(), cr_df, False, "CorrRaw",
+                    "Failed GU Parameters — CorrRaw Data — Line Plot")
     else:
-        print("  No plottable CorrFactor parameters.\n")
-else:
-    print("No CorrFactor failures in summary.\n")
+        print("No CorrRaw data available.\n")
 
-# ── Verify HTML ───────────────────────────────────────────────────────────────────
-if not ve_specs.empty:
-    print(f"=== Verify: {len(ve_specs)} parameter(s) ===")
-    ve_fig = build_figure(
-        param_specs=ve_specs,
-        cf_df=cf_df, ve_df=ve_df,
-        zip_device_map=zip_device_map,
-        page_title="Failed GU Verification Parameters -- Measurement Trace",
-        is_corr=False,
-    )
-    if ve_fig is not None:
-        ve_fig.write_html(OUT_VE_HTML, include_plotlyjs="cdn")
-        print(f"  Saved -> {OUT_VE_HTML}\n")
-        outputs_opened.append(OUT_VE_HTML)
+    if not vr_df.empty:
+        _save_pages(param_specs, pd.DataFrame(), vr_df, False, "VryRaw",
+                    "Failed GU Parameters — VryRaw Data — Line Plot")
     else:
-        print("  No plottable Verify parameters.\n")
-else:
-    print("No Verify failures in summary.\n")
+        print("No VryRaw data available.\n")
 
-# Open all generated HTML files
-for path in outputs_opened:
-    os.startfile(path)
+    print(f"Done.  {len(outputs_opened)} HTML file(s) saved to {PLOT_DIR}")
 
-print("Done.")
+
+if __name__ == "__main__":
+    main()

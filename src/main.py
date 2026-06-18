@@ -26,6 +26,24 @@ import os
 import re
 import csv
 import shutil
+import stat
+
+
+def _force_remove_readonly(func, path, _exc_info):
+    """onerror handler for shutil.rmtree: make file writable then retry."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def _force_delete(path: str) -> None:
+    """Delete a single file, forcing writable if needed. No-op if not found."""
+    if not os.path.exists(path):
+        return
+    try:
+        os.remove(path)
+    except PermissionError:
+        os.chmod(path, stat.S_IWRITE)
+        os.remove(path)
 
 # ── paths ──────────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -39,6 +57,11 @@ else:
 
 folder_name = os.path.basename(GUFILE_DIR)
 OUT_DIR     = os.path.join(os.getcwd(), "result")
+
+# Force-clean the result folder before each run to avoid stale file conflicts
+if os.path.exists(OUT_DIR):
+    print(f"Cleaning previous result folder: {OUT_DIR}")
+    shutil.rmtree(OUT_DIR, onerror=_force_remove_readonly)
 
 # sub-folders for individual extracted files
 DIR_CF  = os.path.join(OUT_DIR, "GuCorrFactor")
@@ -326,6 +349,7 @@ else:
 
 # ── g) Write failure summary CSV ───────────────────────────────────────────────
 out_log = os.path.join(OUT_DIR, "GuLog_FailedSummary.csv")
+_force_delete(out_log)
 fieldnames = [
     "TesterName", "TesterIPaddress", "Date", "FinishTime",
     "Product", "Sublot", "ZipFile", "FailType",

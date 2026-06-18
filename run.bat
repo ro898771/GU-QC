@@ -14,7 +14,7 @@ setlocal
 
 set "SCRIPT_DIR=%~dp0"
 set "SCRIPT=%SCRIPT_DIR%src\main.py"
-set "PLOT_SCRIPT=%SCRIPT_DIR%src\plot_failures.py"
+set "PLOT_SCRIPT=%SCRIPT_DIR%src\plot.py"
 set "ENV_PYTHON=%SCRIPT_DIR%.venv\Scripts\python.exe"
 
 :: Prefer the project venv python; fall back to system py
@@ -57,9 +57,9 @@ for %%F in (%FOLDERS%) do (
     echo.
 )
 
-:: ── Step 2: Generate Plotly failure charts ──────────────────────────────────────
+:: ── Step 2: Generate plot charts ────────────────────────────────────────────────
 echo ============================================================
-echo  Generating Plotly failure charts...
+echo  Generating charts...
 echo ============================================================
 echo.
 
