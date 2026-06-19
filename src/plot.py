@@ -1146,26 +1146,38 @@ function exportPlotsHTML(param, type) {{
   var charts = [];
   SRCS.forEach(function(s) {{
     var el = document.getElementById(s.id);
-    if (el && el.data && el.data.length) {{
-      charts.push({{title: s.title, data: el.data, layout: el.layout}});
-    }}
+    charts.push({{
+      title: s.title,
+      data:  (el && el.data && el.data.length) ? el.data  : null,
+      layout:(el && el.layout)                 ? el.layout: null,
+    }});
   }});
-  if (!charts.length) {{ alert('No chart data to export.'); return; }}
   var sp = param.replace(/</g,'&lt;');
   var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>QuickPlot – ' + sp + '</title>'
     + '<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"><\\/script>'
-    + '<style>body{{font-family:Segoe UI,Arial,sans-serif;background:#f0f2f5;padding:20px}}'
-    + 'h1{{font-size:18px;color:#2c3e50;margin-bottom:16px}}'
-    + '.cw{{background:#fff;border-radius:6px;padding:12px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.1)}}'
-    + '.ct{{font-size:11px;font-weight:bold;color:#2c3e50;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}}'
+    + '<style>'
+    + 'body{{font-family:Segoe UI,Arial,sans-serif;background:#f0f2f5;padding:20px;margin:0}}'
+    + 'h1{{font-size:18px;color:#2c3e50;margin:0 0 14px}}'
+    + '.grid{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}'
+    + '.cell{{background:#f8f9fa;border-radius:6px;padding:10px 12px}}'
+    + '.ct{{font-size:12px;font-weight:bold;color:#2c3e50;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}}'
+    + '.nd{{color:#999;text-align:center;padding:40px 0;font-size:13px}}'
     + '</style></head><body>'
-    + '<h1>QuickPlot: ' + sp + '</h1>';
+    + '<h1>QuickPlot: ' + sp + '</h1>'
+    + '<div class="grid">';
   charts.forEach(function(c, i) {{
-    html += '<div class="cw"><div class="ct">' + c.title + '</div><div id="c' + i + '"></div></div>';
+    html += '<div class="cell"><div class="ct">' + c.title + '</div>';
+    if (c.data) {{
+      html += '<div id="c' + i + '"></div>';
+    }} else {{
+      html += '<div class="nd">No data</div>';
+    }}
+    html += '</div>';
   }});
-  html += '<script>';
+  html += '</div><script>';
   charts.forEach(function(c, i) {{
-    var lay = Object.assign({{}}, c.layout, {{height:400, margin:{{l:60,r:150,t:20,b:50}}}});
+    if (!c.data) return;
+    var lay = Object.assign({{}}, c.layout, {{height:380, margin:{{l:60,r:150,t:20,b:50}}}});
     html += 'Plotly.newPlot("c' + i + '",' + JSON.stringify(c.data) + ',' + JSON.stringify(lay) + ',{{responsive:true}});';
   }});
   html += '<\\/script></body></html>';
