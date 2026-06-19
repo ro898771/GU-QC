@@ -119,6 +119,38 @@ def generate_summary_html(plot_type: str) -> None:
         return [c for c in src_df.columns
                 if c.strip() and c.strip() not in _SKIP and not c.strip().startswith("M_")]
 
+    def _load_limits(path):
+        """Read HighL (row 3) and LowL (row 4) from a concat CSV.
+        Returns {col_name: (lowL, highL)} with float or None values.
+        Sentinel values (|limit| >= 1e5, e.g. 999999 / 9999999) are treated as None."""
+        if not os.path.exists(path):
+            return {}
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            rows = list(csv_mod.reader(fh))
+        if len(rows) < 5:
+            return {}
+        header   = rows[0]
+        high_row = rows[3]
+        low_row  = rows[4]
+        _SENTINEL = 1e5
+        lims = {}
+        for i in range(3, len(header)):
+            col = header[i].strip()
+            if not col or col in _SKIP or col.startswith("M_"):
+                continue
+            try:
+                h = float(high_row[i]) if i < len(high_row) and high_row[i].strip() else None
+                l = float(low_row[i])  if i < len(low_row)  and low_row[i].strip()  else None
+            except ValueError:
+                continue
+            if h is not None and abs(h) >= _SENTINEL:
+                h = None
+            if l is not None and abs(l) >= _SENTINEL:
+                l = None
+            if h is not None or l is not None:
+                lims[col] = (l, h)
+        return lims
+
     # cf_device_map kept for backward compat but superseded by cf_pid_map below
     cf_device_map: dict = {}
 
@@ -171,14 +203,9 @@ def generate_summary_html(plot_type: str) -> None:
                     lambda z: "PID-" + _cf_pid_map.get(str(z), "999")
                 )
 
-    # Limits lookup from failed params only
-    limits_map = {}
-    for _, spec in param_specs.iterrows():
-        p = spec["ParamName"]
-        limits_map[p] = (
-            float(spec.get("LowL",  0) or 0),
-            float(spec.get("HighL", 0) or 0),
-        )
+    # Per-source limits from concat CSV rows 3 (HighL) and 4 (LowL)
+    cf_limits = _load_limits(CF_CSV)
+    ve_limits = _load_limits(VE_CSV)
 
     # Collect every parameter column across all 6 CSVs
     all_cols = set()
@@ -194,16 +221,17 @@ def generate_summary_html(plot_type: str) -> None:
         if not param_cols:
             return {}
         # Detect PID column (Parameter col with "PID-" prefix values)
-        has_pid = ("Parameter" in src_df.columns and
-                   src_df["Parameter"].astype(str).str.startswith("PID-").any())
-        has_arm = "M_Handler-ArmNo" in src_df.columns
-        has_zip = device_map is not None and "ZipFile" in src_df.columns
-        meta    = ["TesterName"]
+        has_pid  = ("Parameter" in src_df.columns and
+                    src_df["Parameter"].astype(str).str.startswith("PID-").any())
+        has_arm  = "M_Handler-ArmNo" in src_df.columns
+        has_zipf = "ZipFile" in src_df.columns
+        has_zip  = device_map is not None and has_zipf
+        meta     = ["TesterName"]
         if has_pid:
             meta.append("Parameter")
         if has_arm:
             meta.append("M_Handler-ArmNo")
-        if has_zip:
+        if has_zipf:
             meta.append("ZipFile")
         numeric = src_df[meta + param_cols].copy()
         for c in param_cols:
@@ -226,9 +254,11 @@ def generate_summary_html(plot_type: str) -> None:
                     pids = [str(i + 1) for i in range(len(vals))]
                 arms  = ([str(a) for a in valid["M_Handler-ArmNo"]]
                          if has_arm else ["N/A"] * len(vals))
+                zips  = ([str(z) for z in valid["ZipFile"]]
+                         if has_zipf else [""] * len(vals))
                 if c not in lookup:
                     lookup[c] = {}
-                lookup[c][str(tester)] = {"v": vals, "p": pids, "a": arms}
+                lookup[c][str(tester)] = {"v": vals, "p": pids, "a": arms, "z": zips}
         return lookup
 
     sorted_cols = sorted(all_cols)
@@ -269,9 +299,13 @@ def generate_summary_html(plot_type: str) -> None:
     plot_data   = {}
     _last_print = _time.time()
     for _i, p in enumerate(sorted_cols, start=1):
+        _cfl = cf_limits.get(p)
+        _vel = ve_limits.get(p)
         entry = {
-            "lowL":  limits_map[p][0] if p in limits_map else None,
-            "highL": limits_map[p][1] if p in limits_map else None,
+            "cfLowL":  _cfl[0] if _cfl else None,
+            "cfHighL": _cfl[1] if _cfl else None,
+            "veLowL":  _vel[0] if _vel else None,
+            "veHighL": _vel[1] if _vel else None,
             "cf": cf_lk.get(p, {}),
             "ve": ve_lk.get(p, {}),
             "cr": cr_lk.get(p, {}),
@@ -425,6 +459,21 @@ def generate_summary_html(plot_type: str) -> None:
   .btn-qp-zoom{{background:#1a6b9a;color:#fff;border:none;padding:4px 10px;
                 border-radius:3px;cursor:pointer;font-size:12px}}
   .btn-qp-zoom:hover{{background:#135580}}
+  .btn-export{{background:#27ae60;color:#fff;border:none;padding:4px 10px;
+               border-radius:3px;cursor:pointer;font-size:12px}}
+  .btn-export:hover{{background:#1e8449}}
+  #qp-table-wrap{{overflow:auto;max-height:65vh}}
+  #qp-data-table{{border-collapse:collapse;width:100%;font-size:12px}}
+  #qp-data-table thead th{{background:#2c3e50;color:#fff;padding:7px 12px;text-align:left;
+                            white-space:nowrap;position:sticky;top:0;z-index:1;
+                            font-size:11px;letter-spacing:.4px;vertical-align:top}}
+  #qp-data-table thead th input{{display:block;margin-top:4px;width:100%;padding:3px 5px;
+                                  font-size:11px;border:1px solid #5a7fa0;border-radius:3px;
+                                  background:#eaf3fb;color:#1a252f;outline:none;
+                                  box-sizing:border-box}}
+  #qp-data-table td{{padding:5px 12px;border-bottom:1px solid #eee;white-space:nowrap}}
+  #qp-data-table tr:nth-child(even) td{{background:#fafafa}}
+  #qp-data-table tr:hover td{{background:#e8f4fd}}
   #qpmodal-box.expanded{{width:100vw;max-width:100vw;height:100vh;max-height:100vh;
                           border-radius:0;padding:14px 18px}}
   /* Unique Params modal */
@@ -434,12 +483,24 @@ def generate_summary_html(plot_type: str) -> None:
   #modal-box{{background:#fff;padding:28px;border-radius:8px;
               width:90vw;max-width:1100px;max-height:88vh;overflow:auto;min-width:500px;
               box-shadow:0 4px 24px rgba(0,0,0,.25)}}
-  #modal-box h2{{font-size:16px;color:#2c3e50;margin-bottom:14px}}
+  #modal-box.expanded{{width:100vw;max-width:100vw;height:100vh;max-height:100vh;
+                        border-radius:0;padding:14px 18px}}
+  #modal-box h2{{font-size:16px;color:#2c3e50;margin:0}}
   #modal-box table{{border-collapse:collapse;width:100%;font-size:13px}}
-  #modal-box th{{background:#2c3e50;color:#fff;padding:8px 14px;text-align:left}}
+  #modal-box th{{background:#2c3e50;color:#fff;padding:8px 14px;text-align:left;
+                 white-space:nowrap}}
   #modal-box td{{padding:7px 14px;border-bottom:1px solid #eee}}
   #modal-box tr:last-child td{{border-bottom:none}}
   #modal-box tr:nth-child(even) td{{background:#fafafa}}
+  /* Flow Reference image modal */
+  #img-modal{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);
+              z-index:1001;align-items:center;justify-content:center}}
+  #img-modal.open{{display:flex}}
+  #img-modal-box{{background:#fff;padding:20px 24px;border-radius:8px;
+                  width:90vw;max-width:1400px;max-height:92vh;overflow:auto;
+                  box-shadow:0 4px 24px rgba(0,0,0,.3)}}
+  #img-modal-box.expanded{{width:100vw;max-width:100vw;height:100vh;max-height:100vh;
+                            border-radius:0;padding:14px 18px}}
   /* Quick-plot modal */
   #qpmodal{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);
             z-index:1000;align-items:center;justify-content:center}}
@@ -461,7 +522,7 @@ def generate_summary_html(plot_type: str) -> None:
   <h1>GU-QC Failure Summary</h1>
   <div class="top-btns">
     <button class="btn btn-blue" onclick="document.getElementById('modal').classList.add('open')">Unique Params</button>
-    <a class="btn" href="{details_path}" target="_blank">Flow Reference by TzerMing</a>
+    <button class="btn" onclick="openImgModal()">Flow Reference by TzerMing</button>
   </div>
 </div>
 <p class="meta">
@@ -479,6 +540,7 @@ def generate_summary_html(plot_type: str) -> None:
   <select id="qp-type" class="qp-select">
     <option value="box" selected>BoxPlot</option>
     <option value="line">Line</option>
+    <option value="table">Table</option>
   </select>
   <button class="btn-plot" onclick="quickPlot()">&#9654; Plot</button>
 </div>
@@ -493,7 +555,9 @@ def generate_summary_html(plot_type: str) -> None:
   <th><div>Device</div><input class="col-filter" data-col="3" type="text" placeholder="Filter..." oninput="filterTable()"></th>
   <th><div>FailType</div><input class="col-filter" data-col="4" type="text" placeholder="Filter..." oninput="filterTable()"></th>
   <th><div>ParamName</div><input class="col-filter" data-col="5" type="text" placeholder="e.g. F_RL*" oninput="filterTable()"></th>
-  <th>LowL</th><th>MeasureError</th><th>HighL</th>
+  <th><div>LowL</div><input class="col-filter" data-col="6" type="text" placeholder=">0 or >=1 <=5" oninput="filterTable()"></th>
+  <th><div>MeasureError</div><input class="col-filter" data-col="7" type="text" placeholder=">0.5 <=1.2" oninput="filterTable()"></th>
+  <th><div>HighL</div><input class="col-filter" data-col="8" type="text" placeholder=">0 or >=1 <=5" oninput="filterTable()"></th>
   <th class="lk">Corr_Factor</th>
   <th class="lk">Verify_Error</th>
   <th class="lk">Raw_B4Final</th>
@@ -508,12 +572,35 @@ def generate_summary_html(plot_type: str) -> None:
 </div>
 
 <!-- Unique Params modal -->
-<div id="modal" onclick="if(event.target===this)this.classList.remove('open')">
+<div id="modal" onclick="if(event.target===this)closeUpModal()">
   <div id="modal-box">
-    <button class="modal-close" onclick="document.getElementById('modal').classList.remove('open')">&#10005; Close</button>
-    <h2>Unique Failed Parameters ({len(param_specs)})</h2>
-    <table><thead><tr><th>#</th><th>ParamName</th><th>FailType</th></tr></thead>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <h2>Unique Failed Parameters (<span id="up-count">{len(param_specs)}</span>)</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn-qp-zoom" id="up-zoom-btn" onclick="toggleUpZoom()">&#10697; Expand</button>
+        <button class="modal-close" style="float:none" onclick="closeUpModal()">&#10005; Close</button>
+      </div>
+    </div>
+    <div style="overflow:auto;max-height:calc(88vh - 90px)">
+    <table><thead><tr>
+      <th>#</th><th>ParamName</th><th>FailType</th>
+    </tr></thead>
     <tbody id="modal-tbody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- Flow Reference image modal -->
+<div id="img-modal" onclick="if(event.target===this)closeImgModal()">
+  <div id="img-modal-box">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <span style="font-weight:600;font-size:14px;color:#2c3e50">Flow Reference by TzerMing</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn-qp-zoom" id="img-zoom-btn" onclick="toggleImgZoom()">&#10697; Expand</button>
+        <button class="modal-close" onclick="closeImgModal()">&#10005; Close</button>
+      </div>
+    </div>
+    <img src="{details_path}" style="max-width:100%;display:block;border-radius:4px">
   </div>
 </div>
 
@@ -547,11 +634,12 @@ def generate_summary_html(plot_type: str) -> None:
     <div class="qp-header">
       <h2 id="qp-title">Quick Plot</h2>
       <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn-export" onclick="exportQuickPlot()">&#8595; Export</button>
         <button class="btn-qp-zoom" id="qp-zoom-btn" onclick="toggleQpZoom()">&#10697; Expand</button>
         <button class="modal-close" onclick="closeQp()">&#10005; Close</button>
       </div>
     </div>
-    <div class="qp-grid">
+    <div id="qp-grid" class="qp-grid">
       <div class="qp-cell">
         <div class="qp-cell-title">Corr Factor</div>
         <div id="qp-cf"></div>
@@ -577,6 +665,7 @@ def generate_summary_html(plot_type: str) -> None:
         <div id="qp-vd"></div>
       </div>
     </div>
+    <div id="qp-table-wrap" style="display:none"></div>
   </div>
 </div>
 
@@ -586,12 +675,7 @@ var PLOT_DATA     = {plot_data_json};
 var PALETTE = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd',
                '#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf'];
 
-(function(){{
-  var tbody = document.getElementById('modal-tbody');
-  tbody.innerHTML = UNIQUE_PARAMS.map(function(r, i){{
-    return '<tr><td>'+(i+1)+'</td><td>'+r.p+'</td><td>'+r.f+'</td></tr>';
-  }}).join('');
-}})();
+renderUpParams();
 
 function closeQp() {{
   document.getElementById('qpmodal').classList.remove('open');
@@ -617,6 +701,61 @@ function toggleQpZoom() {{
     btn.innerHTML = '&#10697; Expand';
   }}
   if (_qpHasPlot) quickPlot();
+}}
+
+// ── Unique Params modal ───────────────────────────────────────────────────
+function renderUpParams() {{
+  document.getElementById('modal-tbody').innerHTML = UNIQUE_PARAMS.map(function(r, i) {{
+    return '<tr><td>' + (i + 1) + '</td><td>' + r.p + '</td><td>' + r.f + '</td></tr>';
+  }}).join('');
+  document.getElementById('up-count').textContent = String(UNIQUE_PARAMS.length);
+}}
+var _upZoomed = false;
+function closeUpModal() {{
+  document.getElementById('modal').classList.remove('open');
+  if (_upZoomed) {{
+    _upZoomed = false;
+    document.getElementById('modal-box').classList.remove('expanded');
+    document.getElementById('up-zoom-btn').innerHTML = '&#10697; Expand';
+  }}
+}}
+function toggleUpZoom() {{
+  _upZoomed = !_upZoomed;
+  var box = document.getElementById('modal-box');
+  var btn = document.getElementById('up-zoom-btn');
+  if (_upZoomed) {{
+    box.classList.add('expanded');
+    btn.innerHTML = '&#10698; Restore';
+  }} else {{
+    box.classList.remove('expanded');
+    btn.innerHTML = '&#10697; Expand';
+  }}
+}}
+
+// ── Flow Reference image modal ────────────────────────────────────────────
+var _imgZoomed = false;
+function openImgModal() {{
+  document.getElementById('img-modal').classList.add('open');
+}}
+function closeImgModal() {{
+  document.getElementById('img-modal').classList.remove('open');
+  if (_imgZoomed) {{
+    _imgZoomed = false;
+    document.getElementById('img-modal-box').classList.remove('expanded');
+    document.getElementById('img-zoom-btn').innerHTML = '&#10697; Expand';
+  }}
+}}
+function toggleImgZoom() {{
+  _imgZoomed = !_imgZoomed;
+  var box = document.getElementById('img-modal-box');
+  var btn = document.getElementById('img-zoom-btn');
+  if (_imgZoomed) {{
+    box.classList.add('expanded');
+    btn.innerHTML = '&#10698; Restore';
+  }} else {{
+    box.classList.remove('expanded');
+    btn.innerHTML = '&#10697; Expand';
+  }}
 }}
 
 // ── Parameter picker ──────────────────────────────────────────────────────
@@ -703,12 +842,19 @@ function quickPlot() {{
   _qpHasPlot = true;
   document.getElementById('qp-title').textContent = 'Quick Plot: ' + param;
   document.getElementById('qpmodal').classList.add('open');
-  renderChart('qp-cf', d.cf, d.lowL,  d.highL,  type);
-  renderChart('qp-ve', d.ve, d.lowL,  d.highL,  type);
-  renderChart('qp-cr', d.cr, null,    null,      type);
-  renderChart('qp-vr', d.vr, null,    null,      type);
-  renderChart('qp-rf', d.rf, null,    null,      type);
-  renderChart('qp-vd', d.vd, null,    null,      type);
+  var isTable = (type === 'table');
+  document.getElementById('qp-grid').style.display       = isTable ? 'none'  : 'grid';
+  document.getElementById('qp-table-wrap').style.display = isTable ? 'block' : 'none';
+  if (isTable) {{
+    renderTable(param, d);
+  }} else {{
+    renderChart('qp-cf', d.cf, d.cfLowL,  d.cfHighL,  type);
+    renderChart('qp-ve', d.ve, d.veLowL,  d.veHighL,  type);
+    renderChart('qp-cr', d.cr, null,    null,      type);
+    renderChart('qp-vr', d.vr, null,    null,      type);
+    renderChart('qp-rf', d.rf, null,    null,      type);
+    renderChart('qp-vd', d.vd, null,    null,      type);
+  }}
 }}
 
 function renderChart(divId, grouped, lowL, highL, type) {{
@@ -792,18 +938,206 @@ function globToRegex(pat) {{
   return new RegExp('^' + esc + '$', 'i');
 }}
 function filterTable() {{
+  var NUMERIC_COLS = {{6: true, 7: true, 8: true}};
   var filters = [];
   document.querySelectorAll('.col-filter').forEach(function(inp) {{
-    var re = globToRegex(inp.value.trim());
-    if (re) filters.push({{col: parseInt(inp.dataset.col, 10), re: re}});
+    var col = parseInt(inp.dataset.col, 10);
+    var raw = inp.value.trim();
+    if (!raw) return;
+    if (NUMERIC_COLS[col]) {{
+      var conds = parseNumericFilter(raw);
+      if (conds) {{ filters.push({{col: col, conds: conds}}); return; }}
+    }}
+    var re = globToRegex(raw);
+    if (re) filters.push({{col: col, re: re}});
   }});
   document.querySelectorAll('#tbl tbody tr').forEach(function(row) {{
     var cells = row.querySelectorAll('td');
     var show = filters.every(function(f) {{
-      return f.re.test(cells[f.col].textContent.trim());
+      var text = cells[f.col].textContent.trim();
+      return f.conds ? applyNumericFilter(f.conds, text) : f.re.test(text);
     }});
     row.style.display = show ? '' : 'none';
   }});
+}}
+function parseNumericFilter(expr) {{
+  /* Parse expressions like: >3  >=2.5  <10  <=4  >1 <=5  (space-separated AND) */
+  var parts = expr.trim().split(/\s+/);
+  var conds = [];
+  var re = /^(>=|<=|>|<|==?)\s*(-?[\d.]+)$/;
+  for (var i = 0; i < parts.length; i++) {{
+    var m = parts[i].match(re);
+    if (!m) return null;
+    conds.push({{op: m[1], val: parseFloat(m[2])}});
+  }}
+  return conds.length ? conds : null;
+}}
+function applyNumericFilter(conds, text) {{
+  var n = parseFloat(text);
+  if (isNaN(n)) return false;
+  return conds.every(function(c) {{
+    switch (c.op) {{
+      case '>':         return n >  c.val;
+      case '<':         return n <  c.val;
+      case '>=':        return n >= c.val;
+      case '<=':        return n <= c.val;
+      case '=': case '==': return n === c.val;
+      default:          return false;
+    }}
+  }});
+}}
+function filterQpTable() {{
+  var tbl = document.getElementById('qp-data-table');
+  if (!tbl) return;
+  var NUMERIC_COLS = {{4: true, 5: true}};
+  var filters = [];
+  tbl.querySelectorAll('.qp-col-filter').forEach(function(inp) {{
+    var col = parseInt(inp.dataset.col, 10);
+    var raw = inp.value.trim();
+    if (!raw) return;
+    if (NUMERIC_COLS[col]) {{
+      var conds = parseNumericFilter(raw);
+      if (conds) {{ filters.push({{col: col, conds: conds}}); return; }}
+    }}
+    var re = globToRegex(raw);
+    if (re) filters.push({{col: col, re: re}});
+  }});
+  tbl.querySelectorAll('tbody tr').forEach(function(row) {{
+    var cells = row.querySelectorAll('td');
+    var show = filters.every(function(f) {{
+      var text = cells[f.col].textContent.trim();
+      return f.conds ? applyNumericFilter(f.conds, text) : f.re.test(text);
+    }});
+    row.style.display = show ? '' : 'none';
+  }});
+}}
+
+function renderTable(param, d) {{
+  var SOURCES = [
+    {{key:'cf', label:'CorrFactor'}},
+    {{key:'ve', label:'VrfyError'}},
+    {{key:'cr', label:'CorrRaw'}},
+    {{key:'vr', label:'VryRaw'}},
+    {{key:'rf', label:'RefFinal'}},
+    {{key:'vd', label:'VrfyData'}},
+  ];
+  var rows = [];
+  SOURCES.forEach(function(src) {{
+    var grouped = d[src.key];
+    if (!grouped || !Object.keys(grouped).length) return;
+    Object.keys(grouped).sort().forEach(function(tester) {{
+      var entry = grouped[tester];
+      for (var i = 0; i < entry.v.length; i++) {{
+        rows.push({{
+          source: src.label,
+          zip:    entry.z ? String(entry.z[i]) : '',
+          pid:    entry.p ? String(entry.p[i]) : String(i + 1),
+          tester: tester,
+          arm:    entry.a ? String(entry.a[i]) : 'N/A',
+          value:  entry.v[i],
+        }});
+      }}
+    }});
+  }});
+  var wrap = document.getElementById('qp-table-wrap');
+  if (!rows.length) {{
+    wrap.innerHTML = '<p style="color:#999;text-align:center;padding:40px;">No data available</p>';
+    return;
+  }}
+  function esc(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }}
+  function fi(col, ph) {{
+    return '<input type="text" class="qp-col-filter" data-col="' + col
+         + '" placeholder="' + ph + '" oninput="filterQpTable()">';
+  }}
+  var html = '<table id="qp-data-table"><thead><tr>'
+    + '<th><div>Source</div>'     + fi(0,'filter...') + '</th>'
+    + '<th><div>ZipFile</div>'    + fi(1,'filter...') + '</th>'
+    + '<th><div>PID</div>'        + fi(2,'filter...') + '</th>'
+    + '<th><div>TesterName</div>' + fi(3,'filter...') + '</th>'
+    + '<th><div>ArmNo</div>'      + fi(4,'>3 or >=2 <=5') + '</th>'
+    + '<th><div>Value</div>'      + fi(5,'>0.5 <=1.2') + '</th>'
+    + '</tr></thead><tbody>';
+  rows.forEach(function(r) {{
+    html += '<tr>'
+          + '<td>' + esc(r.source) + '</td>'
+          + '<td>' + esc(r.zip)    + '</td>'
+          + '<td>' + esc(r.pid)    + '</td>'
+          + '<td>' + esc(r.tester) + '</td>'
+          + '<td>' + esc(r.arm)    + '</td>'
+          + '<td>' + esc(r.value)  + '</td>'
+          + '</tr>';
+  }});
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}}
+
+function exportQuickPlot() {{
+  var param = document.getElementById('qp-param').value.trim();
+  var type  = document.getElementById('qp-type').value;
+  if (!param || !_qpHasPlot) {{ alert('Please plot a parameter first.'); return; }}
+  if (type === 'table') {{ exportTableCSV(param); }}
+  else {{ exportPlotsHTML(param, type); }}
+}}
+
+function exportTableCSV(param) {{
+  var tbl = document.getElementById('qp-data-table');
+  if (!tbl) {{ alert('No table data to export.'); return; }}
+  var csv = '';
+  tbl.querySelectorAll('tr').forEach(function(row) {{
+    csv += Array.from(row.querySelectorAll('th,td')).map(function(c) {{
+      var v = c.textContent.trim();
+      return (v.indexOf(',') >= 0 || v.indexOf('"') >= 0)
+             ? '"' + v.replace(/"/g, '""') + '"' : v;
+    }}).join(',') + '\\n';
+  }});
+  downloadBlob(csv, param.replace(/[^a-zA-Z0-9_-]/g,'_') + '_table.csv', 'text/csv');
+}}
+
+function exportPlotsHTML(param, type) {{
+  var SRCS = [
+    {{id:'qp-cf', title:'Corr Factor'}},
+    {{id:'qp-ve', title:'Verify Error'}},
+    {{id:'qp-cr', title:'Raw Before Final (CorrRaw)'}},
+    {{id:'qp-vr', title:'Raw Before Verify (VryRaw)'}},
+    {{id:'qp-rf', title:'Ref Final Data'}},
+    {{id:'qp-vd', title:'Vrfy Data'}},
+  ];
+  var charts = [];
+  SRCS.forEach(function(s) {{
+    var el = document.getElementById(s.id);
+    if (el && el.data && el.data.length) {{
+      charts.push({{title: s.title, data: el.data, layout: el.layout}});
+    }}
+  }});
+  if (!charts.length) {{ alert('No chart data to export.'); return; }}
+  var sp = param.replace(/</g,'&lt;');
+  var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>QuickPlot – ' + sp + '</title>'
+    + '<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"><\\/script>'
+    + '<style>body{{font-family:Segoe UI,Arial,sans-serif;background:#f0f2f5;padding:20px}}'
+    + 'h1{{font-size:18px;color:#2c3e50;margin-bottom:16px}}'
+    + '.cw{{background:#fff;border-radius:6px;padding:12px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.1)}}'
+    + '.ct{{font-size:11px;font-weight:bold;color:#2c3e50;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}}'
+    + '</style></head><body>'
+    + '<h1>QuickPlot: ' + sp + '</h1>';
+  charts.forEach(function(c, i) {{
+    html += '<div class="cw"><div class="ct">' + c.title + '</div><div id="c' + i + '"></div></div>';
+  }});
+  html += '<script>';
+  charts.forEach(function(c, i) {{
+    var lay = Object.assign({{}}, c.layout, {{height:400, margin:{{l:60,r:150,t:20,b:50}}}});
+    html += 'Plotly.newPlot("c' + i + '",' + JSON.stringify(c.data) + ',' + JSON.stringify(lay) + ',{{responsive:true}});';
+  }});
+  html += '<\\/script></body></html>';
+  downloadBlob(html, param.replace(/[^a-zA-Z0-9_-]/g,'_') + '_plots.html', 'text/html');
+}}
+
+function downloadBlob(content, filename, mimeType) {{
+  var blob = new Blob([content], {{type: mimeType}});
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
 }}
 </script>
 </body>
