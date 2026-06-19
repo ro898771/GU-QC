@@ -488,7 +488,11 @@ def generate_summary_html(plot_type: str) -> None:
   #modal-box h2{{font-size:16px;color:#2c3e50;margin:0}}
   #modal-box table{{border-collapse:collapse;width:100%;font-size:13px}}
   #modal-box th{{background:#2c3e50;color:#fff;padding:8px 14px;text-align:left;
-                 white-space:nowrap}}
+                 white-space:nowrap;vertical-align:top;position:sticky;top:0;z-index:1}}
+  #modal-box thead th input{{display:block;margin-top:4px;width:100%;padding:3px 5px;
+                              font-size:11px;border:1px solid #5a7fa0;border-radius:3px;
+                              background:#eaf3fb;color:#1a252f;outline:none;
+                              box-sizing:border-box;font-weight:normal}}
   #modal-box td{{padding:7px 14px;border-bottom:1px solid #eee}}
   #modal-box tr:last-child td{{border-bottom:none}}
   #modal-box tr:nth-child(even) td{{background:#fafafa}}
@@ -577,13 +581,16 @@ def generate_summary_html(plot_type: str) -> None:
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <h2>Unique Failed Parameters (<span id="up-count">{len(param_specs)}</span>)</h2>
       <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn-export" onclick="exportUpParams()">&#8595; Export CSV</button>
         <button class="btn-qp-zoom" id="up-zoom-btn" onclick="toggleUpZoom()">&#10697; Expand</button>
         <button class="modal-close" style="float:none" onclick="closeUpModal()">&#10005; Close</button>
       </div>
     </div>
     <div style="overflow:auto;max-height:calc(88vh - 90px)">
-    <table><thead><tr>
-      <th>#</th><th>ParamName</th><th>FailType</th>
+    <table id="up-table"><thead><tr>
+      <th>#</th>
+      <th><div>ParamName</div><input class="up-col-filter" data-col="1" type="text" placeholder="e.g. F_RL*" oninput="filterUpParams()"></th>
+      <th><div>FailType</div><input class="up-col-filter" data-col="2" type="text" placeholder="filter..." oninput="filterUpParams()"></th>
     </tr></thead>
     <tbody id="modal-tbody"></tbody></table>
     </div>
@@ -709,6 +716,40 @@ function renderUpParams() {{
     return '<tr><td>' + (i + 1) + '</td><td>' + r.p + '</td><td>' + r.f + '</td></tr>';
   }}).join('');
   document.getElementById('up-count').textContent = String(UNIQUE_PARAMS.length);
+}}
+function filterUpParams() {{
+  var filters = [];
+  document.querySelectorAll('.up-col-filter').forEach(function(inp) {{
+    var re = globToRegex(inp.value.trim());
+    if (re) filters.push({{col: parseInt(inp.dataset.col, 10), re: re}});
+  }});
+  var visible = 0;
+  document.querySelectorAll('#modal-tbody tr').forEach(function(row) {{
+    var cells = row.querySelectorAll('td');
+    var show = filters.every(function(f) {{
+      return f.re.test(cells[f.col] ? cells[f.col].textContent.trim() : '');
+    }});
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  }});
+  document.getElementById('up-count').textContent =
+    visible === UNIQUE_PARAMS.length
+      ? String(UNIQUE_PARAMS.length)
+      : visible + ' / ' + UNIQUE_PARAMS.length;
+}}
+function exportUpParams() {{
+  function csvCell(v) {{
+    return (v.indexOf(',') >= 0 || v.indexOf('"') >= 0 || v.indexOf('\\n') >= 0)
+      ? '"' + v.replace(/"/g, '""') + '"' : v;
+  }}
+  var rows = [];
+  document.querySelectorAll('#modal-tbody tr').forEach(function(row) {{
+    if (row.style.display === 'none') return;
+    var cells = row.querySelectorAll('td');
+    rows.push(Array.from(cells).map(function(c) {{ return csvCell(c.textContent.trim()); }}).join(','));
+  }});
+  var csv = 'No,ParamName,FailType\\n' + rows.join('\\n');
+  downloadBlob(csv, 'UniqueParams.csv', 'text/csv');
 }}
 var _upZoomed = false;
 function closeUpModal() {{
