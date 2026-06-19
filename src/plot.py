@@ -57,38 +57,36 @@ def generate_summary_html(plot_type: str) -> None:
     CC_CSV = os.path.join(RESULT_DIR, "GuCorrCoeff_ALL_CONCAT.csv")
 
     if not os.path.exists(SUMMARY_CSV):
-        print("  [SKIP] GuLog_FailedSummary.csv not found — no summary table.")
-        return
+        print("  [INFO] GuLog_FailedSummary.csv not found — generating page with QuickPlot only.")
+        df = pd.DataFrame()
+    else:
+        with open(SUMMARY_CSV, encoding="utf-8") as f:
+            _first_line = f.readline().strip()
+        if _first_line.startswith("All Pass"):
+            print("  All Pass — generating Summary page with QuickPlot only.")
+            df = pd.DataFrame()
+        else:
+            df = pd.read_csv(SUMMARY_CSV)
 
-    with open(SUMMARY_CSV, encoding="utf-8") as f:
-        if f.readline().strip().startswith("All Pass"):
-            print("  All Pass — no summary table to generate.")
-            return
-
-    df = pd.read_csv(SUMMARY_CSV)
-    if df.empty:
-        return
-
-    # Unique (ParamName, FailType) in first-seen order — same ordering used
-    # by LinePlot/Boxplot generators for all 4 plot sets.
-    param_specs = (
-        df.groupby(["ParamName", "FailType"], sort=False)
-        .first()
-        .reset_index()
-    )
-
-    # Single unified page map keyed on (ParamName, FailType)
-    all_pages = {
-        (row["ParamName"], row["FailType"]): (i // PER_PAGE) + 1
-        for i, (_, row) in enumerate(param_specs.iterrows())
-    }
-
-    # Modal data: unique (ParamName, FailType) pairs as JSON for JS modal
-    modal_json = json.dumps(
-        [{"p": r["ParamName"], "f": r["FailType"]}
-         for _, r in param_specs.iterrows()],
-        ensure_ascii=False,
-    )
+    if not df.empty:
+        # Unique (ParamName, FailType) in first-seen order
+        param_specs = (
+            df.groupby(["ParamName", "FailType"], sort=False)
+            .first()
+            .reset_index()
+        )
+        all_pages = {
+            (row["ParamName"], row["FailType"]): (i // PER_PAGE) + 1
+            for i, (_, row) in enumerate(param_specs.iterrows())
+        }
+        modal_json = json.dumps(
+            [{"p": r["ParamName"], "f": r["FailType"]}
+             for _, r in param_specs.iterrows()],
+            ensure_ascii=False,
+        )
+    else:
+        all_pages  = {}
+        modal_json = "[]"
 
     # ── Quick-plot: load concat CSVs and extract per-param data ─────────────
     def _load_csv(path):
@@ -417,6 +415,14 @@ def generate_summary_html(plot_type: str) -> None:
 
     details_path = "../../Info/TzerMingCalculation.png"
 
+    _no_fail_row = (
+        "<tr><td colspan='17' style='text-align:center;padding:30px;"
+        "color:#27ae60;font-weight:600;font-size:15px'>"
+        "&#10003; All Pass &#8212; No failures detected. Use Quick Plot above to inspect parameters."
+        "</td></tr>"
+    )
+    _tbody = "".join(rows_html) if rows_html else _no_fail_row
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -433,6 +439,10 @@ def generate_summary_html(plot_type: str) -> None:
         cursor:pointer;font-size:12px;text-decoration:none;white-space:nowrap}}
   .btn:hover{{background:#1a252f}}
   .btn-blue{{background:#1a6b9a}}.btn-blue:hover{{background:#135580}}
+  .btn-update{{background:#e67e22;color:#fff;border:none;padding:3px 7px;border-radius:3px;
+               cursor:pointer;font-size:11px;white-space:nowrap;display:block;
+               width:100%;margin-top:3px;text-align:center}}
+  .btn-update:hover{{background:#d35400}}
   .meta{{color:#666;margin-bottom:10px;font-size:11px}}
   /* Quick-plot bar */
   .qp-bar{{display:flex;align-items:center;gap:8px;margin-bottom:14px;
@@ -600,9 +610,17 @@ def generate_summary_html(plot_type: str) -> None:
   <button class="btn-plot" onclick="quickPlot()">&#9654; Plot</button>
 </div>
 
-<div style="margin-bottom:6px">
+<div style="margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
   <button id="undo-btn" class="btn" onclick="undoLimitChange()" disabled
           title="Undo last LSL/USL edit (Ctrl+Z)">&#8630; Undo</button>
+  <button class="btn btn-update" style="display:inline-block;width:auto;margin-top:0;padding:6px 14px;font-size:12px"
+          onclick="updateCorrTemplate()"
+          title="Select CorrTemplate CSV to update Factor_Add_LowLimit / Factor_Add_HighLimit for changed Corr-factor rows">&#128196; CorrTemplate Update</button>
+  <button class="btn btn-update" style="display:inline-block;width:auto;margin-top:0;padding:6px 14px;font-size:12px"
+          onclick="updateGuBench()"
+          title="Select GuBenchDataFile CSV to update LowL / HighL for changed Verification rows">&#128196; GuBench File Update</button>
+  <input type="file" id="corr-template-file" accept=".csv" style="display:none">
+  <input type="file" id="gubench-file" accept=".csv" style="display:none">
 </div>
 <div class="wrap">
 <table id="tbl">
@@ -635,7 +653,7 @@ def generate_summary_html(plot_type: str) -> None:
 </tr>
 </thead>
 <tbody>
-{''.join(rows_html)}
+{_tbody}
 </tbody>
 </table>
 </div>
@@ -1364,6 +1382,104 @@ function exportPlotsHTML(param, type) {{
   downloadBlob(html, param.replace(/[^a-zA-Z0-9_-]/g,'_') + '_plots.html', 'text/html');
 }}
 
+// ── Limit file updaters ───────────────────────────────────────────────────
+function collectChangedRows(failTypeFilter) {{
+  var changed = {{}};
+  document.querySelectorAll('#tbl tbody tr').forEach(function(row) {{
+    var cells = row.querySelectorAll('td');
+    if (cells[9].textContent.trim() !== 'Yes') return;
+    var ftype = cells[4].textContent.trim();
+    if (ftype !== failTypeFilter) return;
+    var param  = cells[5].textContent.trim();
+    var lslInp = cells[6].querySelector('.lsl-inp');
+    var uslInp = cells[8].querySelector('.usl-inp');
+    var lsl = lslInp ? lslInp.value.trim() : '';
+    var usl = uslInp ? uslInp.value.trim() : '';
+    if (param && !changed[param]) changed[param] = {{lsl: lsl, usl: usl}};
+  }});
+  return changed;
+}}
+function updateCorrTemplate() {{
+  var changed = collectChangedRows('Failed GU Corr-factor limits');
+  if (!Object.keys(changed).length) {{
+    alert('No changed Corr-factor rows found.\\nEdit LowL/HighL for "Failed GU Corr-factor limits" rows first (Changes = Yes).');
+    return;
+  }}
+  document.getElementById('corr-template-file').click();
+}}
+function updateGuBench() {{
+  var changed = collectChangedRows('Failed GU Verification limits');
+  if (!Object.keys(changed).length) {{
+    alert('No changed Verification rows found.\\nEdit LowL/HighL for "Failed GU Verification limits" rows first (Changes = Yes).');
+    return;
+  }}
+  document.getElementById('gubench-file').click();
+}}
+document.getElementById('corr-template-file').addEventListener('change', function(e) {{
+  var file = e.target.files[0]; if (!file) return;
+  var changed = collectChangedRows('Failed GU Corr-factor limits');
+  var reader = new FileReader();
+  reader.onload = function(ev) {{
+    var text  = ev.target.result;
+    var sep   = text.indexOf('\\r\\n') >= 0 ? '\\r\\n' : '\\n';
+    var lines = text.split(/\\r?\\n/);
+    var hdr   = lines[0].split(',');
+    var pIdx  = hdr.indexOf('ParameterName');
+    var loIdx = hdr.indexOf('Factor_Add_LowLimit');
+    var hiIdx = hdr.indexOf('Factor_Add_HighLimit');
+    if (pIdx < 0 || loIdx < 0 || hiIdx < 0) {{
+      alert('CorrTemplate format error — expected columns:\\nParameterName, Factor_Add_LowLimit, Factor_Add_HighLimit'); return;
+    }}
+    var updated = 0;
+    var out = lines.map(function(line, i) {{
+      if (i === 0 || !line.trim()) return line;
+      var cols  = line.split(',');
+      var pname = (cols[pIdx] || '').trim();
+      if (changed[pname]) {{
+        cols[loIdx] = changed[pname].lsl;
+        cols[hiIdx] = changed[pname].usl;
+        updated++;
+      }}
+      return cols.join(',');
+    }});
+    if (!updated) {{ alert('No matching parameters found in the selected CorrTemplate file.'); return; }}
+    downloadBlob(out.join(sep), file.name, 'text/csv');
+    alert('CorrTemplate updated: ' + updated + ' parameter(s) modified.\\nDownloaded as: ' + file.name);
+  }};
+  reader.readAsText(file); e.target.value = '';
+}});
+document.getElementById('gubench-file').addEventListener('change', function(e) {{
+  var file = e.target.files[0]; if (!file) return;
+  var changed = collectChangedRows('Failed GU Verification limits');
+  var reader = new FileReader();
+  reader.onload = function(ev) {{
+    var text = ev.target.result;
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    var sep   = text.indexOf('\\r\\n') >= 0 ? '\\r\\n' : '\\n';
+    var lines = text.split(/\\r?\\n/);
+    if (lines.length < 5) {{ alert('GuBench format error — expected at least 5 header rows (row 3=HighL, row 4=LowL).'); return; }}
+    var hdr = lines[0].split(',');
+    var colMap = {{}};
+    for (var ci = 0; ci < hdr.length; ci++) colMap[hdr[ci].trim()] = ci;
+    var hiRow = lines[3].split(',');
+    var loRow = lines[4].split(',');
+    var updated = 0;
+    for (var param in changed) {{
+      var ci = colMap[param];
+      if (ci !== undefined) {{
+        hiRow[ci] = changed[param].usl;
+        loRow[ci] = changed[param].lsl;
+        updated++;
+      }}
+    }}
+    if (!updated) {{ alert('No matching parameters found in the selected GuBench file.'); return; }}
+    lines[3] = hiRow.join(',');
+    lines[4] = loRow.join(',');
+    downloadBlob(lines.join(sep), file.name, 'text/csv');
+    alert('GuBench updated: ' + updated + ' parameter(s) modified.\\nDownloaded as: ' + file.name);
+  }};
+  reader.readAsText(file); e.target.value = '';
+}});
 function downloadBlob(content, filename, mimeType) {{
   var blob = new Blob([content], {{type: mimeType}});
   var url  = URL.createObjectURL(blob);
