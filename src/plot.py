@@ -292,9 +292,10 @@ def generate_summary_html(plot_type: str) -> None:
         elapsed = 0
         while not _stop_ticker.wait(1.0):
             elapsed += 1
+            msg = f"\r    [{_done_count[0]}/{_ntasks}] processing... {elapsed}s elapsed"
             with _print_lock:
-                print(f"\r    [{_done_count[0]}/{_ntasks}] processing... {elapsed}s elapsed",
-                      end="", flush=True)
+                sys.stdout.write(msg)
+                sys.stdout.flush()
 
     _tick_thread = _threading.Thread(target=_ticker, daemon=True)
     _tick_thread.start()
