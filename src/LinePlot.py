@@ -13,9 +13,9 @@ Each unique ParamName gets one subplot:
 
 CorrFactor x-axis note
   GuCorrFactor_ALL_CONCAT.csv uses Parameter=999 for every row (site-level aggregate).
-  The actual device IDs tested in each session are resolved from GuVrfyError_ALL_CONCAT.csv
-  (same ZipFile -> unique PID rows).  Each CorrFactor session is therefore expanded to
-  one point per device so the x-axis shows individual device measurements.
+  The actual device IDs are resolved from Corr_GuCorrRawData_ALL_CONCAT.csv
+  (same ZipFile -> unique PID rows).  The hover label shows all PIDs in the format
+  #7000007,#7000008,... for each calibration session.
 """
 
 from __future__ import annotations
@@ -88,31 +88,31 @@ def find_column(df: pd.DataFrame, param_name: str) -> str | None:
     return matches[0] if matches else None
 
 
-# ── Device-ID mapping: ZipFile -> sorted list of device IDs ─────────────────────
-def build_zip_device_map(ve_df: pd.DataFrame) -> dict[str, list[str]]:
+# ── Device-ID mapping: ZipFile -> "#PID1,#PID2,..." ─────────────────────────────
+def build_zip_device_map(cr_df: pd.DataFrame) -> dict[str, str]:
     """
-    Build {ZipFile: ['7000018', '7000019', ...]} from the Parameter column of
-    GuVrfyError_ALL_CONCAT.csv (values are like 'PID-7000018').
-    This is used to expand CorrFactor rows (which have Parameter=999) to
-    the actual devices that were run in that session.
+    Build {ZipFile: '#7000007,#7000008,...'} from the Parameter column of
+    Corr_GuCorrRawData_ALL_CONCAT.csv (values are like 'PID-7000007').
+    Used to label CorrFactor data points (Parameter=999) with the actual
+    device IDs that were run in that calibration session.
     """
-    mapping: dict[str, list[str]] = {}
-    if ve_df.empty or "ZipFile" not in ve_df.columns:
+    mapping: dict[str, str] = {}
+    if cr_df.empty or "ZipFile" not in cr_df.columns or "Parameter" not in cr_df.columns:
         return mapping
-    for zipfile, grp in ve_df.groupby("ZipFile"):
+    for zipfile, grp in cr_df.groupby("ZipFile"):
         pids = sorted({
             str(p).replace("PID-", "")
             for p in grp["Parameter"].unique()
             if str(p).startswith("PID-")
         })
         if pids:
-            mapping[str(zipfile)] = pids
+            mapping[str(zipfile)] = ",".join("#" + p for p in pids)
     return mapping
 
 
 # ── Data extraction helpers ───────────────────────────────────────────────────────
 def get_corr_data(cf_df: pd.DataFrame, col: str,
-                  zip_device_map: dict[str, list[str]]) -> pd.DataFrame:
+                  zip_device_map: dict[str, str]) -> pd.DataFrame:
     """
     Extract CorrFactor rows for *col*.  One point per session (ZipFile).
     The Device column contains all device IDs for that session as a
@@ -569,15 +569,8 @@ def main():
     if not vr_df.empty:
         print(f"  GuRawData       : {len(vr_df):,} data rows")
 
-    # Build ZipFile -> device-ID string from GuLog_FailedSummary CorrFactor rows
-    cf_mask = summary_df["FailType"].astype(str).str.startswith("Failed GU Corr-factor")
-    zip_device_map = (
-        summary_df[cf_mask & summary_df["Device"].fillna("").astype(str).ne("")]
-        .drop_duplicates("ZipFile")
-        .set_index("ZipFile")["Device"]
-        .astype(str)
-        .to_dict()
-    ) if "Device" in summary_df.columns else {}
+    # Build ZipFile -> "#PID1,#PID2,..." from CorrRawData for CF labeling
+    zip_device_map = build_zip_device_map(cr_df)
     print(f"  ZipFile->Device map : {len(zip_device_map)} session(s)\n")
 
     os.makedirs(PLOT_DIR, exist_ok=True)

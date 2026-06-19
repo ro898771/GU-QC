@@ -52,6 +52,8 @@ def generate_summary_html(plot_type: str) -> None:
     VE_CSV = os.path.join(RESULT_DIR, "GuVrfyError_ALL_CONCAT.csv")
     CR_CSV = os.path.join(RESULT_DIR, "Corr_GuCorrRawData_ALL_CONCAT.csv")
     VR_CSV = os.path.join(RESULT_DIR, "Vry_GuRawData_ALL_CONCAT.csv")
+    RF_CSV = os.path.join(RESULT_DIR, "GuRefFinalData_ALL_CONCAT.csv")
+    VD_CSV = os.path.join(RESULT_DIR, "GuVrfyData_ALL_CONCAT.csv")
 
     if not os.path.exists(SUMMARY_CSV):
         print("  [SKIP] GuLog_FailedSummary.csv not found — no summary table.")
@@ -117,15 +119,8 @@ def generate_summary_html(plot_type: str) -> None:
         return [c for c in src_df.columns
                 if c.strip() and c.strip() not in _SKIP and not c.strip().startswith("M_")]
 
-    # Build ZipFile -> device-ID string from CorrFactor rows in summary
-    _cf_mask = df["FailType"].astype(str).str.startswith("Failed GU Corr-factor")
-    cf_device_map = (
-        df[_cf_mask & df["Device"].fillna("").astype(str).ne("")]
-        .drop_duplicates("ZipFile")
-        .set_index("ZipFile")["Device"]
-        .astype(str)
-        .to_dict()
-    ) if "Device" in df.columns else {}
+    # cf_device_map kept for backward compat but superseded by cf_pid_map below
+    cf_device_map: dict = {}
 
     import time as _time
 
@@ -141,6 +136,8 @@ def generate_summary_html(plot_type: str) -> None:
         ("GuVrfyError    ", VE_CSV, "ve"),
         ("GuCorrRawData  ", CR_CSV, "cr"),
         ("Vry_GuRawData  ", VR_CSV, "vr"),
+        ("GuRefFinalData ", RF_CSV, "rf"),
+        ("GuVrfyData     ", VD_CSV, "vd"),
     ]:
         print(f"    [{_label}] loading ...", end="", flush=True)
         _df = _load_csv(_path)
@@ -151,7 +148,28 @@ def generate_summary_html(plot_type: str) -> None:
         if _slot == "cf":   cf_df = _df
         elif _slot == "ve": ve_df = _df
         elif _slot == "cr": cr_df = _df
+        elif _slot == "rf": rf_df = _df
+        elif _slot == "vd": vd_df = _df
         else:               vr_df = _df
+
+    # Build ZipFile -> "#PID1,#PID2,..." from CorrRawData and patch cf_df
+    # so Parameter=PID-999 rows carry the real device labels into _build_lookup.
+    if not cr_df.empty and all(c in cr_df.columns for c in ("ZipFile", "Parameter")):
+        _cf_pid_map: dict = {}
+        for _zf, _grp in cr_df.groupby("ZipFile"):
+            _pids = sorted({
+                str(p).replace("PID-", "")
+                for p in _grp["Parameter"].unique()
+                if str(p).startswith("PID-")
+            })
+            if _pids:
+                _cf_pid_map[str(_zf)] = ",".join("#" + p for p in _pids)
+        if _cf_pid_map and not cf_df.empty and "Parameter" in cf_df.columns and "ZipFile" in cf_df.columns:
+            _999_mask = cf_df["Parameter"].astype(str).str.contains("999", na=False)
+            if _999_mask.any():
+                cf_df.loc[_999_mask, "Parameter"] = cf_df.loc[_999_mask, "ZipFile"].map(
+                    lambda z: "PID-" + _cf_pid_map.get(str(z), "999")
+                )
 
     # Limits lookup from failed params only
     limits_map = {}
@@ -162,9 +180,9 @@ def generate_summary_html(plot_type: str) -> None:
             float(spec.get("HighL", 0) or 0),
         )
 
-    # Collect every parameter column across all 4 CSVs
+    # Collect every parameter column across all 6 CSVs
     all_cols = set()
-    for src_df in (cf_df, ve_df, cr_df, vr_df):
+    for src_df in (cf_df, ve_df, cr_df, vr_df, rf_df, vd_df):
         all_cols.update(_param_cols(src_df))
 
     # Pre-build grouped lookup per DataFrame in one pass.
@@ -215,27 +233,37 @@ def generate_summary_html(plot_type: str) -> None:
 
     sorted_cols = sorted(all_cols)
     total_cols  = len(sorted_cols)
-    print(f"\n  Pre-processing {total_cols} parameter(s) across 4 DataFrames...")
+    print(f"\n  Pre-processing {total_cols} parameter(s) across 6 DataFrames...")
 
-    print("    CorrFactor  [1/4] groupby ...", end="", flush=True)
+    print("    CorrFactor  [1/6] groupby ...", end="", flush=True)
     _t0 = _time.time()
     cf_lk = _build_lookup(cf_df, cf_device_map); del cf_df
     print(f"  {len(cf_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
 
-    print("    VrfyError   [2/4] groupby ...", end="", flush=True)
+    print("    VrfyError   [2/6] groupby ...", end="", flush=True)
     _t0 = _time.time()
     ve_lk = _build_lookup(ve_df); del ve_df
     print(f"  {len(ve_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
 
-    print("    CorrRawData [3/4] groupby ...", end="", flush=True)
+    print("    CorrRawData [3/6] groupby ...", end="", flush=True)
     _t0 = _time.time()
     cr_lk = _build_lookup(cr_df); del cr_df
     print(f"  {len(cr_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
 
-    print("    VryRawData  [4/4] groupby ...", end="", flush=True)
+    print("    VryRawData  [4/6] groupby ...", end="", flush=True)
     _t0 = _time.time()
     vr_lk = _build_lookup(vr_df); del vr_df
     print(f"  {len(vr_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
+
+    print("    RefFinalData[5/6] groupby ...", end="", flush=True)
+    _t0 = _time.time()
+    rf_lk = _build_lookup(rf_df); del rf_df
+    print(f"  {len(rf_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
+
+    print("    VrfyData    [6/6] groupby ...", end="", flush=True)
+    _t0 = _time.time()
+    vd_lk = _build_lookup(vd_df); del vd_df
+    print(f"  {len(vd_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
 
     print(f"\n  Assembling JSON for {total_cols} parameter(s)...")
     plot_data   = {}
@@ -248,8 +276,10 @@ def generate_summary_html(plot_type: str) -> None:
             "ve": ve_lk.get(p, {}),
             "cr": cr_lk.get(p, {}),
             "vr": vr_lk.get(p, {}),
+            "rf": rf_lk.get(p, {}),
+            "vd": vd_lk.get(p, {}),
         }
-        if any(entry[k] for k in ("cf", "ve", "cr", "vr")):
+        if any(entry[k] for k in ("cf", "ve", "cr", "vr", "rf", "vd")):
             plot_data[p] = entry
         _now = _time.time()
         if _now - _last_print >= 0.5:
@@ -538,6 +568,14 @@ def generate_summary_html(plot_type: str) -> None:
         <div class="qp-cell-title">Raw Before Verify (VryRaw)</div>
         <div id="qp-vr"></div>
       </div>
+      <div class="qp-cell">
+        <div class="qp-cell-title">Ref Final Data</div>
+        <div id="qp-rf"></div>
+      </div>
+      <div class="qp-cell">
+        <div class="qp-cell-title">Vrfy Data</div>
+        <div id="qp-vd"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -669,6 +707,8 @@ function quickPlot() {{
   renderChart('qp-ve', d.ve, d.lowL,  d.highL,  type);
   renderChart('qp-cr', d.cr, null,    null,      type);
   renderChart('qp-vr', d.vr, null,    null,      type);
+  renderChart('qp-rf', d.rf, null,    null,      type);
+  renderChart('qp-vd', d.vd, null,    null,      type);
 }}
 
 function renderChart(divId, grouped, lowL, highL, type) {{

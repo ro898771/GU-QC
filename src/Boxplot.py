@@ -1051,20 +1051,22 @@ def main():
     N = len(param_specs)
     print(f"GuLog_FailedSummary: {len(summary_df)} failure rows -> {N} unique parameter(s) to plot\n")
 
-    # Build ZipFile -> device-ID string from CorrFactor rows
-    _cf_mask = summary_df["FailType"].astype(str).str.startswith("Failed GU Corr-factor")
-    cf_device_map = (
-        summary_df[_cf_mask & summary_df["Device"].fillna("").astype(str).ne("")]
-        .drop_duplicates("ZipFile")
-        .set_index("ZipFile")["Device"]
-        .astype(str)
-        .to_dict()
-    ) if "Device" in summary_df.columns else {}
-
     cf_df = _load_concat_csv(_CF_CSV)
     ve_df = _load_concat_csv(_VE_CSV)
     cr_df = _load_concat_csv(_CR_CSV)
     vr_df = _load_concat_csv(_VR_CSV)
+
+    # Build ZipFile -> "#PID1,#PID2,..." from CorrRawData for CF labeling
+    cf_device_map: dict = {}
+    if not cr_df.empty and all(c in cr_df.columns for c in ("ZipFile", "Parameter")):
+        for _zf, _grp in cr_df.groupby("ZipFile"):
+            _pids = sorted({
+                str(p).replace("PID-", "")
+                for p in _grp["Parameter"].unique()
+                if str(p).startswith("PID-")
+            })
+            if _pids:
+                cf_device_map[str(_zf)] = ",".join("#" + p for p in _pids)
 
     if not cf_df.empty:
         print(f"  GuCorrFactor    : {len(cf_df):,} data rows")

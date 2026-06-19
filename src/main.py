@@ -68,8 +68,10 @@ DIR_CF  = os.path.join(OUT_DIR, "GuCorrFactor")
 DIR_VE  = os.path.join(OUT_DIR, "GuVrfyError")
 DIR_CR  = os.path.join(OUT_DIR, "Corr_GuCorrRawData")
 DIR_VR  = os.path.join(OUT_DIR, "Vry_GuRawData")
+DIR_RF  = os.path.join(OUT_DIR, "GuRefFinalData")
+DIR_VD  = os.path.join(OUT_DIR, "GuVrfyData")
 
-for d in (OUT_DIR, DIR_CF, DIR_VE, DIR_CR, DIR_VR):
+for d in (OUT_DIR, DIR_CF, DIR_VE, DIR_CR, DIR_VR, DIR_RF, DIR_VD):
     os.makedirs(d, exist_ok=True)
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -132,12 +134,36 @@ def get_tester_name(lines: list[str]) -> str:
     return ""
 
 
-def concat_csv_files(file_list: list[tuple[str, str]], output_path: str) -> int:
+def build_zip_tester_map(extracted_list: list[tuple[str, str]]) -> dict[str, str]:
+    """Return {zip_name: tester_name} by reading TesterName from extracted CSV files."""
+    mapping: dict[str, str] = {}
+    for path, zip_name in extracted_list:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if line.startswith("TesterName,"):
+                        tester = line[len("TesterName,"):].strip()
+                        if tester:
+                            mapping[zip_name] = tester
+                        break
+        except OSError:
+            continue
+    return mapping
+
+
+def concat_csv_files(file_list: list[tuple[str, str]], output_path: str,
+                     pid_map: dict | None = None,
+                     tester_map: dict | None = None) -> int:
     """
     Concatenate CSV files that share the GuVrfyError / GuCorrFactor / GuCorrRawData
     format (Global Info header + col-descriptor rows + PID data rows).
 
     file_list : list of (file_path, zip_name) tuples
+    pid_map    : optional {zip_name: '#PID1,#PID2,...'} — when provided, rows whose
+                 PID field is exactly 999 have that field replaced with the real device
+                 IDs (CSV-quoted so commas inside the field are handled correctly).
+    tester_map : optional {zip_name: tester_name} — fallback when the file itself has
+                 no TesterName header (e.g. GuRefFinalData).
 
     Output columns: TesterName, ZipFile, <original columns...>
       - Col-descriptor rows (Parameter / Test# / Unit / HighL / LowL) → first file only
@@ -154,6 +180,8 @@ def concat_csv_files(file_list: list[tuple[str, str]], output_path: str) -> int:
             lines = f.readlines()
 
         tester_name = get_tester_name(lines)
+        if not tester_name and tester_map:
+            tester_name = tester_map.get(zip_name, "")
 
         for line in lines:
             raw = line.rstrip("\n").rstrip("\r")
@@ -167,6 +195,14 @@ def concat_csv_files(file_list: list[tuple[str, str]], output_path: str) -> int:
                         prefix = ","
                     col_header_rows.append(f"{prefix},{raw}\n")
             elif is_data_row(first):
+                if pid_map is not None:
+                    pid_val = first.replace("PID-", "") if first.startswith("PID-") else first
+                    if pid_val == "999":
+                        real_pids = pid_map.get(zip_name)
+                        if real_pids:
+                            comma_pos = raw.index(",") if "," in raw else len(raw)
+                            rest = raw[comma_pos:]
+                            raw = f'"PID-{real_pids}"{rest}'
                 data_rows.append(f"{tester_name},{zip_name},{raw}\n")
 
         col_header_written = True
@@ -176,6 +212,33 @@ def concat_csv_files(file_list: list[tuple[str, str]], output_path: str) -> int:
         out.writelines(data_rows)
 
     return len(data_rows)
+
+
+def build_cr_pid_map(extracted_cr: list[tuple[str, str]]) -> dict[str, str]:
+    """
+    Return {zip_name: '#7000007,#7000008,...'} by reading the extracted
+    CorrRawData CSV files.  Used to replace PID-999 in GuCorrFactor rows.
+    """
+    mapping: dict[str, str] = {}
+    for path, zip_name in extracted_cr:
+        pids: set[str] = set()
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    first = line.split(",")[0].strip()
+                    if first.startswith("PID-"):
+                        pid_val = first[4:]  # strip "PID-"
+                    elif first and first[0].isdigit():
+                        pid_val = first
+                    else:
+                        continue
+                    if pid_val and pid_val != "999":
+                        pids.add(pid_val)
+        except OSError:
+            continue
+        if pids:
+            mapping[zip_name] = ",".join("#" + p for p in sorted(pids))
+    return mapping
 
 
 # ── GuLogPrintout failure regexes ─────────────────────────────────────────────
@@ -221,6 +284,8 @@ extracted_cf  = []   # list of (path, zip_name) for extracted GuCorrFactor files
 extracted_ve  = []   # list of (path, zip_name) for extracted GuVrfyError files
 extracted_cr  = []   # list of (path, zip_name) for extracted GuCorrRawData files
 extracted_vr  = []   # list of (path, zip_name) for extracted GuRawData files
+extracted_rf  = []   # list of (path, zip_name) for extracted GuRefFinalData files
+extracted_vd  = []   # list of (path, zip_name) for extracted GuVrfyData files
 failure_rows  = []   # dicts for the summary table
 
 for zip_name in zip_files:
@@ -272,6 +337,24 @@ for zip_name in zip_files:
             print(f"  [VR ] {os.path.basename(entry_vr)}")
         else:
             print(f"  [VR ] SKIP — not found")
+
+        # ── i) GuRefFinalData ─────────────────────────────────────────────────
+        entry_rf = extract_file_from_zip(zf, "GuRefFinalData", "1_RefDataAnalysis")
+        if entry_rf:
+            dest = extract_and_save(zf, entry_rf, DIR_RF)
+            extracted_rf.append((dest, zip_name))
+            print(f"  [RF ] {os.path.basename(entry_rf)}")
+        else:
+            print(f"  [RF ] SKIP — not found")
+
+        # ── j) GuVrfyData ────────────────────────────────────────────────────
+        entry_vd = extract_file_from_zip(zf, "GuVrfyData", "4_VerifyAnalysis")
+        if entry_vd:
+            dest = extract_and_save(zf, entry_vd, DIR_VD)
+            extracted_vd.append((dest, zip_name))
+            print(f"  [VD ] {os.path.basename(entry_vd)}")
+        else:
+            print(f"  [VD ] SKIP — not found")
 
         # ── g) GuLogPrintout failures ─────────────────────────────────────────
         log_entries = [e for e in entries if "GuLogPrintout" in e]
@@ -333,7 +416,8 @@ for zip_name in zip_files:
 print("\n" + "=" * 70)
 if extracted_cf:
     out_cf = os.path.join(OUT_DIR, "GuCorrFactor_ALL_CONCAT.csv")
-    n = concat_csv_files(extracted_cf, out_cf)
+    _cr_pid_map = build_cr_pid_map(extracted_cr) if extracted_cr else {}
+    n = concat_csv_files(extracted_cf, out_cf, pid_map=_cr_pid_map)
     print(f"[b] GuCorrFactor concat  : {n} data rows  ->  {out_cf}")
 else:
     print("[b] GuCorrFactor concat  : no files to concat")
@@ -362,6 +446,23 @@ if extracted_vr:
 else:
     print("[i] GuRawData concat     : no files to concat")
 
+# ── k) Concat GuRefFinalData ───────────────────────────────────────────────────
+if extracted_rf:
+    out_rf = os.path.join(OUT_DIR, "GuRefFinalData_ALL_CONCAT.csv")
+    _rf_tester_map = build_zip_tester_map(extracted_ve if extracted_ve else extracted_vd)
+    n = concat_csv_files(extracted_rf, out_rf, tester_map=_rf_tester_map)
+    print(f"[k] GuRefFinalData concat: {n} data rows  ->  {out_rf}")
+else:
+    print("[k] GuRefFinalData concat: no files to concat")
+
+# ── l) Concat GuVrfyData ───────────────────────────────────────────────────────
+if extracted_vd:
+    out_vd = os.path.join(OUT_DIR, "GuVrfyData_ALL_CONCAT.csv")
+    n = concat_csv_files(extracted_vd, out_vd)
+    print(f"[l] GuVrfyData concat    : {n} data rows  ->  {out_vd}")
+else:
+    print("[l] GuVrfyData concat    : no files to concat")
+
 # ── g) Write failure summary CSV ───────────────────────────────────────────────
 out_log = os.path.join(OUT_DIR, "GuLog_FailedSummary.csv")
 _force_delete(out_log)
@@ -382,11 +483,13 @@ print(f"[g] GuLog failure summary: {len(failure_rows)} rows  ->  {out_log}")
 # ── final summary ──────────────────────────────────────────────────────────────
 print("\n" + "=" * 70)
 print("ALL DONE")
-print(f"  GuCorrFactor  : {len(extracted_cf)} files extracted,  concat written")
-print(f"  GuVrfyError   : {len(extracted_ve)} files extracted,  concat written")
-print(f"  GuCorrRawData : {len(extracted_cr)} files extracted,  concat written")
-print(f"  GuRawData     : {len(extracted_vr)} files extracted,  concat written")
-print(f"  Failure rows  : {len(failure_rows)}")
+print(f"  GuCorrFactor    : {len(extracted_cf)} files extracted,  concat written")
+print(f"  GuVrfyError     : {len(extracted_ve)} files extracted,  concat written")
+print(f"  GuCorrRawData   : {len(extracted_cr)} files extracted,  concat written")
+print(f"  GuRawData       : {len(extracted_vr)} files extracted,  concat written")
+print(f"  GuRefFinalData  : {len(extracted_rf)} files extracted,  concat written")
+print(f"  GuVrfyData      : {len(extracted_vd)} files extracted,  concat written")
+print(f"  Failure rows    : {len(failure_rows)}")
 print(f"  Output folder : {OUT_DIR}")
 
 os.startfile(OUT_DIR)
