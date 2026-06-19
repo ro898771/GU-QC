@@ -54,6 +54,7 @@ def generate_summary_html(plot_type: str) -> None:
     VR_CSV = os.path.join(RESULT_DIR, "Vry_GuRawData_ALL_CONCAT.csv")
     RF_CSV = os.path.join(RESULT_DIR, "GuRefFinalData_ALL_CONCAT.csv")
     VD_CSV = os.path.join(RESULT_DIR, "GuVrfyData_ALL_CONCAT.csv")
+    CC_CSV = os.path.join(RESULT_DIR, "GuCorrCoeff_ALL_CONCAT.csv")
 
     if not os.path.exists(SUMMARY_CSV):
         print("  [SKIP] GuLog_FailedSummary.csv not found — no summary table.")
@@ -170,6 +171,7 @@ def generate_summary_html(plot_type: str) -> None:
         ("Vry_GuRawData  ", VR_CSV, "vr"),
         ("GuRefFinalData ", RF_CSV, "rf"),
         ("GuVrfyData     ", VD_CSV, "vd"),
+        ("GuCorrCoeff    ", CC_CSV, "cc"),
     ]:
         print(f"    [{_label}] loading ...", end="", flush=True)
         _df = _load_csv(_path)
@@ -182,6 +184,7 @@ def generate_summary_html(plot_type: str) -> None:
         elif _slot == "cr": cr_df = _df
         elif _slot == "rf": rf_df = _df
         elif _slot == "vd": vd_df = _df
+        elif _slot == "cc": cc_df = _df
         else:               vr_df = _df
 
     # Build ZipFile -> "#PID1,#PID2,..." from CorrRawData and patch cf_df
@@ -206,6 +209,7 @@ def generate_summary_html(plot_type: str) -> None:
     # Per-source limits from concat CSV rows 3 (HighL) and 4 (LowL)
     cf_limits = _load_limits(CF_CSV)
     ve_limits = _load_limits(VE_CSV)
+    cc_limits = _load_limits(CC_CSV)
 
     # Collect every parameter column across all 6 CSVs
     all_cols = set()
@@ -265,7 +269,7 @@ def generate_summary_html(plot_type: str) -> None:
     total_cols  = len(sorted_cols)
     print(f"\n  Pre-processing {total_cols} parameter(s) across 6 DataFrames...")
 
-    print("    CorrFactor  [1/6] groupby ...", end="", flush=True)
+    print("    CorrFactor  [1/7] groupby ...", end="", flush=True)
     _t0 = _time.time()
     cf_lk = _build_lookup(cf_df, cf_device_map); del cf_df
     print(f"  {len(cf_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
@@ -290,10 +294,15 @@ def generate_summary_html(plot_type: str) -> None:
     rf_lk = _build_lookup(rf_df); del rf_df
     print(f"  {len(rf_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
 
-    print("    VrfyData    [6/6] groupby ...", end="", flush=True)
+    print("    VrfyData    [6/7] groupby ...", end="", flush=True)
     _t0 = _time.time()
     vd_lk = _build_lookup(vd_df); del vd_df
     print(f"  {len(vd_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
+
+    print("    CorrCoeff   [7/7] groupby ...", end="", flush=True)
+    _t0 = _time.time()
+    cc_lk = _build_lookup(cc_df); del cc_df
+    print(f"  {len(cc_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
 
     print(f"\n  Assembling JSON for {total_cols} parameter(s)...")
     plot_data   = {}
@@ -301,19 +310,23 @@ def generate_summary_html(plot_type: str) -> None:
     for _i, p in enumerate(sorted_cols, start=1):
         _cfl = cf_limits.get(p)
         _vel = ve_limits.get(p)
+        _ccl = cc_limits.get(p)
         entry = {
             "cfLowL":  _cfl[0] if _cfl else None,
             "cfHighL": _cfl[1] if _cfl else None,
             "veLowL":  _vel[0] if _vel else None,
             "veHighL": _vel[1] if _vel else None,
+            "ccLowL":  _ccl[0] if _ccl else None,
+            "ccHighL": _ccl[1] if _ccl else None,
             "cf": cf_lk.get(p, {}),
             "ve": ve_lk.get(p, {}),
             "cr": cr_lk.get(p, {}),
             "vr": vr_lk.get(p, {}),
             "rf": rf_lk.get(p, {}),
             "vd": vd_lk.get(p, {}),
+            "cc": cc_lk.get(p, {}),
         }
-        if any(entry[k] for k in ("cf", "ve", "cr", "vr", "rf", "vd")):
+        if any(entry[k] for k in ("cf", "ve", "cr", "vr", "rf", "vd", "cc")):
             plot_data[p] = entry
         _now = _time.time()
         if _now - _last_print >= 0.5:
@@ -671,6 +684,10 @@ def generate_summary_html(plot_type: str) -> None:
         <div class="qp-cell-title">Vrfy Data</div>
         <div id="qp-vd"></div>
       </div>
+      <div class="qp-cell">
+        <div class="qp-cell-title">Corr Coeff</div>
+        <div id="qp-cc"></div>
+      </div>
     </div>
     <div id="qp-table-wrap" style="display:none"></div>
   </div>
@@ -891,10 +908,11 @@ function quickPlot() {{
   }} else {{
     renderChart('qp-cf', d.cf, d.cfLowL,  d.cfHighL,  type);
     renderChart('qp-ve', d.ve, d.veLowL,  d.veHighL,  type);
-    renderChart('qp-cr', d.cr, null,    null,      type);
-    renderChart('qp-vr', d.vr, null,    null,      type);
-    renderChart('qp-rf', d.rf, null,    null,      type);
-    renderChart('qp-vd', d.vd, null,    null,      type);
+    renderChart('qp-cr', d.cr, null,      null,        type);
+    renderChart('qp-vr', d.vr, null,      null,        type);
+    renderChart('qp-rf', d.rf, null,      null,        type);
+    renderChart('qp-vd', d.vd, null,      null,        type);
+    renderChart('qp-cc', d.cc, d.ccLowL,  d.ccHighL,  type);
   }}
 }}
 
@@ -1061,6 +1079,7 @@ function renderTable(param, d) {{
     {{key:'vr', label:'VryRaw'}},
     {{key:'rf', label:'RefFinal'}},
     {{key:'vd', label:'VrfyData'}},
+    {{key:'cc', label:'CorrCoeff'}},
   ];
   var rows = [];
   SOURCES.forEach(function(src) {{
@@ -1142,6 +1161,7 @@ function exportPlotsHTML(param, type) {{
     {{id:'qp-vr', title:'Raw Before Verify (VryRaw)'}},
     {{id:'qp-rf', title:'Ref Final Data'}},
     {{id:'qp-vd', title:'Vrfy Data'}},
+    {{id:'qp-cc', title:'Corr Coeff'}},
   ];
   var charts = [];
   SRCS.forEach(function(s) {{

@@ -70,8 +70,9 @@ DIR_CR  = os.path.join(OUT_DIR, "Corr_GuCorrRawData")
 DIR_VR  = os.path.join(OUT_DIR, "Vry_GuRawData")
 DIR_RF  = os.path.join(OUT_DIR, "GuRefFinalData")
 DIR_VD  = os.path.join(OUT_DIR, "GuVrfyData")
+DIR_CC  = os.path.join(OUT_DIR, "GuCorrCoeff")
 
-for d in (OUT_DIR, DIR_CF, DIR_VE, DIR_CR, DIR_VR, DIR_RF, DIR_VD):
+for d in (OUT_DIR, DIR_CF, DIR_VE, DIR_CR, DIR_VR, DIR_RF, DIR_VD, DIR_CC):
     os.makedirs(d, exist_ok=True)
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -286,6 +287,7 @@ extracted_cr  = []   # list of (path, zip_name) for extracted GuCorrRawData file
 extracted_vr  = []   # list of (path, zip_name) for extracted GuRawData files
 extracted_rf  = []   # list of (path, zip_name) for extracted GuRefFinalData files
 extracted_vd  = []   # list of (path, zip_name) for extracted GuVrfyData files
+extracted_cc  = []   # list of (path, zip_name) for extracted GuCorrCoeff files
 failure_rows  = []   # dicts for the summary table
 
 for zip_name in zip_files:
@@ -355,6 +357,22 @@ for zip_name in zip_files:
             print(f"  [VD ] {os.path.basename(entry_vd)}")
         else:
             print(f"  [VD ] SKIP — not found")
+
+        # ── k2) GuCorrCoeff ───────────────────────────────────────────────────
+        entry_cc = extract_file_from_zip(zf, "GuCorrCoeff", "4_VerifyAnalysis")
+        if entry_cc and "LooseDemo" not in entry_cc:
+            dest = extract_and_save(zf, entry_cc, DIR_CC)
+            extracted_cc.append((dest, zip_name))
+            print(f"  [CC ] {os.path.basename(entry_cc)}")
+        else:
+            fallback_cc = [e for e in entries if "GuCorrCoeff" in e and "LooseDemo" not in e
+                           and "4_VerifyAnalysis" in e]
+            if fallback_cc:
+                dest = extract_and_save(zf, fallback_cc[0], DIR_CC)
+                extracted_cc.append((dest, zip_name))
+                print(f"  [CC ] {os.path.basename(fallback_cc[0])}")
+            else:
+                print(f"  [CC ] SKIP — not found")
 
         # ── g) GuLogPrintout failures ─────────────────────────────────────────
         log_entries = [e for e in entries if "GuLogPrintout" in e]
@@ -463,6 +481,15 @@ if extracted_vd:
 else:
     print("[l] GuVrfyData concat    : no files to concat")
 
+# ── m) Concat GuCorrCoeff ──────────────────────────────────────────────────────
+if extracted_cc:
+    out_cc = os.path.join(OUT_DIR, "GuCorrCoeff_ALL_CONCAT.csv")
+    _rf_pid_map = build_cr_pid_map(extracted_rf) if extracted_rf else {}
+    n = concat_csv_files(extracted_cc, out_cc, pid_map=_rf_pid_map)
+    print(f"[m] GuCorrCoeff concat   : {n} data rows  ->  {out_cc}")
+else:
+    print("[m] GuCorrCoeff concat   : no files to concat")
+
 # ── g) Write failure summary CSV ───────────────────────────────────────────────
 out_log = os.path.join(OUT_DIR, "GuLog_FailedSummary.csv")
 _force_delete(out_log)
@@ -489,6 +516,7 @@ print(f"  GuCorrRawData   : {len(extracted_cr)} files extracted,  concat written
 print(f"  GuRawData       : {len(extracted_vr)} files extracted,  concat written")
 print(f"  GuRefFinalData  : {len(extracted_rf)} files extracted,  concat written")
 print(f"  GuVrfyData      : {len(extracted_vd)} files extracted,  concat written")
+print(f"  GuCorrCoeff     : {len(extracted_cc)} files extracted,  concat written")
 print(f"  Failure rows    : {len(failure_rows)}")
 print(f"  Output folder : {OUT_DIR}")
 
