@@ -219,47 +219,47 @@ def generate_summary_html(plot_type: str) -> None:
     # Pre-build grouped lookup per DataFrame in one pass.
     # Result: {col: {tester: {"v": [values], "p": [pids], "a": [arms]}}}
     def _build_lookup(src_df, device_map=None):
+        import numpy as np
         if src_df.empty or "TesterName" not in src_df.columns:
             return {}
         param_cols = _param_cols(src_df)
         if not param_cols:
             return {}
-        # Detect PID column (Parameter col with "PID-" prefix values)
         has_pid  = ("Parameter" in src_df.columns and
                     src_df["Parameter"].astype(str).str.startswith("PID-").any())
         has_arm  = "M_Handler-ArmNo" in src_df.columns
         has_zipf = "ZipFile" in src_df.columns
         has_zip  = device_map is not None and has_zipf
         meta     = ["TesterName"]
-        if has_pid:
-            meta.append("Parameter")
-        if has_arm:
-            meta.append("M_Handler-ArmNo")
-        if has_zipf:
-            meta.append("ZipFile")
-        numeric = src_df[meta + param_cols].copy()
-        for c in param_cols:
-            numeric[c] = pd.to_numeric(numeric[c], errors="coerce")
+        if has_pid:  meta.append("Parameter")
+        if has_arm:  meta.append("M_Handler-ArmNo")
+        if has_zipf: meta.append("ZipFile")
+        sub = src_df[meta + param_cols].copy()
+        # Bulk-convert all param columns to float in one call instead of 2168 individual calls
+        sub[param_cols] = sub[param_cols].apply(pd.to_numeric, errors="coerce")
         lookup = {}
-        for tester, grp in numeric.groupby("TesterName"):
+        for tester, grp in sub.groupby("TesterName"):
             grp = grp.reset_index(drop=True)
-            for c in param_cols:
-                mask = grp[c].notna()
-                if not mask.any():
+            # Extract param values as a numpy matrix once — avoids per-column pandas overhead
+            mat      = grp[param_cols].to_numpy(dtype=float, na_value=float("nan"))
+            pid_list = grp["Parameter"].tolist()        if has_pid  else None
+            arm_list = grp["M_Handler-ArmNo"].tolist()  if has_arm  else None
+            zip_list = grp["ZipFile"].tolist()          if has_zipf else None
+            for ci, c in enumerate(param_cols):
+                col   = mat[:, ci]
+                valid = ~np.isnan(col)
+                if not valid.any():
                     continue
-                valid = grp[mask]
-                vals  = [round(float(v), 6) for v in valid[c]]
+                idx  = np.where(valid)[0]
+                vals = [round(float(col[i]), 6) for i in idx]
                 if has_pid:
-                    pids = [str(p).replace("PID-", "") for p in valid["Parameter"]]
+                    pids = [str(pid_list[i]).replace("PID-", "") for i in idx]
                 elif has_zip:
-                    pids = [device_map.get(str(z), f"*{i + 1}")
-                            for i, z in enumerate(valid["ZipFile"])]
+                    pids = [device_map.get(str(zip_list[i]), f"*{i + 1}") for i in idx]
                 else:
                     pids = [str(i + 1) for i in range(len(vals))]
-                arms  = ([str(a) for a in valid["M_Handler-ArmNo"]]
-                         if has_arm else ["N/A"] * len(vals))
-                zips  = ([str(z) for z in valid["ZipFile"]]
-                         if has_zipf else [""] * len(vals))
+                arms = [str(arm_list[i]) for i in idx] if has_arm  else ["N/A"] * len(vals)
+                zips = [str(zip_list[i]) for i in idx] if has_zipf else [""] * len(vals)
                 if c not in lookup:
                     lookup[c] = {}
                 lookup[c][str(tester)] = {"v": vals, "p": pids, "a": arms, "z": zips}
