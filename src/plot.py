@@ -266,6 +266,7 @@ def generate_summary_html(plot_type: str) -> None:
         return lookup
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading as _threading
 
     sorted_cols = sorted(all_cols)
     total_cols  = len(sorted_cols)
@@ -279,20 +280,42 @@ def generate_summary_html(plot_type: str) -> None:
         ("VrfyData",     vd_df, None),
         ("CorrCoeff",    cc_df, None),
     ]
-    print(f"\n  Pre-processing {total_cols} parameter(s) across {len(_tasks)} DataFrames (parallel)...")
+    _ntasks = len(_tasks)
+    print(f"\n  Pre-processing {total_cols} parameter(s) across {_ntasks} DataFrames (parallel)...")
     _t0 = _time.time()
     _lk_results = {}
-    with ThreadPoolExecutor(max_workers=len(_tasks)) as _pool:
+    _done_count  = [0]
+    _print_lock  = _threading.Lock()
+    _stop_ticker = _threading.Event()
+
+    def _ticker():
+        elapsed = 0
+        while not _stop_ticker.wait(1.0):
+            elapsed += 1
+            with _print_lock:
+                print(f"\r    [{_done_count[0]}/{_ntasks}] processing... {elapsed}s elapsed",
+                      end="", flush=True)
+
+    _tick_thread = _threading.Thread(target=_ticker, daemon=True)
+    _tick_thread.start()
+
+    with ThreadPoolExecutor(max_workers=_ntasks) as _pool:
         _futures = {
             _pool.submit(_build_lookup, df, dm): label
             for label, df, dm in _tasks
         }
         for _fut in as_completed(_futures):
             _label = _futures[_fut]
-            _lk = _fut.result()
+            _lk    = _fut.result()
             _lk_results[_label] = _lk
-            print(f"    {_label:14s} done  {len(_lk)} param(s)", flush=True)
-    print(f"  All {len(_tasks)} lookups built in {_time.time() - _t0:.1f}s")
+            _done_count[0] += 1
+            with _print_lock:
+                print(f"\r    [{_done_count[0]}/{_ntasks}] {_label:14s} done  "
+                      f"{len(_lk)} param(s)", flush=True)
+
+    _stop_ticker.set()
+    _tick_thread.join()
+    print(f"  All {_ntasks} lookups built in {_time.time() - _t0:.1f}s")
 
     cf_lk = _lk_results["CorrFactor"]
     ve_lk = _lk_results["VrfyError"]
