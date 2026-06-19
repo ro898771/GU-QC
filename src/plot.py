@@ -265,44 +265,43 @@ def generate_summary_html(plot_type: str) -> None:
                 lookup[c][str(tester)] = {"v": vals, "p": pids, "a": arms, "z": zips}
         return lookup
 
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     sorted_cols = sorted(all_cols)
     total_cols  = len(sorted_cols)
-    print(f"\n  Pre-processing {total_cols} parameter(s) across 6 DataFrames...")
 
-    print("    CorrFactor  [1/7] groupby ...", end="", flush=True)
+    _tasks = [
+        ("CorrFactor",   cf_df, cf_device_map),
+        ("VrfyError",    ve_df, None),
+        ("CorrRawData",  cr_df, None),
+        ("VryRawData",   vr_df, None),
+        ("RefFinalData", rf_df, None),
+        ("VrfyData",     vd_df, None),
+        ("CorrCoeff",    cc_df, None),
+    ]
+    print(f"\n  Pre-processing {total_cols} parameter(s) across {len(_tasks)} DataFrames (parallel)...")
     _t0 = _time.time()
-    cf_lk = _build_lookup(cf_df, cf_device_map); del cf_df
-    print(f"  {len(cf_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
+    _lk_results = {}
+    with ThreadPoolExecutor(max_workers=len(_tasks)) as _pool:
+        _futures = {
+            _pool.submit(_build_lookup, df, dm): label
+            for label, df, dm in _tasks
+        }
+        for _fut in as_completed(_futures):
+            _label = _futures[_fut]
+            _lk = _fut.result()
+            _lk_results[_label] = _lk
+            print(f"    {_label:14s} done  {len(_lk)} param(s)", flush=True)
+    print(f"  All {len(_tasks)} lookups built in {_time.time() - _t0:.1f}s")
 
-    print("    VrfyError   [2/6] groupby ...", end="", flush=True)
-    _t0 = _time.time()
-    ve_lk = _build_lookup(ve_df); del ve_df
-    print(f"  {len(ve_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
-
-    print("    CorrRawData [3/6] groupby ...", end="", flush=True)
-    _t0 = _time.time()
-    cr_lk = _build_lookup(cr_df); del cr_df
-    print(f"  {len(cr_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
-
-    print("    VryRawData  [4/6] groupby ...", end="", flush=True)
-    _t0 = _time.time()
-    vr_lk = _build_lookup(vr_df); del vr_df
-    print(f"  {len(vr_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
-
-    print("    RefFinalData[5/6] groupby ...", end="", flush=True)
-    _t0 = _time.time()
-    rf_lk = _build_lookup(rf_df); del rf_df
-    print(f"  {len(rf_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
-
-    print("    VrfyData    [6/7] groupby ...", end="", flush=True)
-    _t0 = _time.time()
-    vd_lk = _build_lookup(vd_df); del vd_df
-    print(f"  {len(vd_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
-
-    print("    CorrCoeff   [7/7] groupby ...", end="", flush=True)
-    _t0 = _time.time()
-    cc_lk = _build_lookup(cc_df); del cc_df
-    print(f"  {len(cc_lk)} param(s)  [{_time.time() - _t0:.1f}s]")
+    cf_lk = _lk_results["CorrFactor"]
+    ve_lk = _lk_results["VrfyError"]
+    cr_lk = _lk_results["CorrRawData"]
+    vr_lk = _lk_results["VryRawData"]
+    rf_lk = _lk_results["RefFinalData"]
+    vd_lk = _lk_results["VrfyData"]
+    cc_lk = _lk_results["CorrCoeff"]
+    del cf_df, ve_df, cr_df, vr_df, rf_df, vd_df, cc_df
 
     print(f"\n  Assembling JSON for {total_cols} parameter(s)...")
     plot_data   = {}
