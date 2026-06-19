@@ -401,9 +401,11 @@ def generate_summary_html(plot_type: str) -> None:
             f"<td>{_dev(row.get('Device',''))}</td>"
             f"<td>{_esc(fail_type)}</td>"
             f"<td class='param'>{_esc(param)}</td>"
-            f"<td>{_esc(row.get('LowL',''))}</td>"
+            f"<td><input class='lim-inp lsl-inp' data-param='{_esc(param)}' data-ftype='{_esc(fail_type)}' data-orig='{_esc(row.get('LowL',''))}' value='{_esc(row.get('LowL',''))}' onfocus='onLimitFocus(this)' oninput='onLimitChange(this,\"lsl\")' onblur='onLimitBlur()'></td>"
             f"<td>{_esc(row.get('MeasureError',''))}</td>"
-            f"<td>{_esc(row.get('HighL',''))}</td>"
+            f"<td><input class='lim-inp usl-inp' data-param='{_esc(param)}' data-ftype='{_esc(fail_type)}' data-orig='{_esc(row.get('HighL',''))}' value='{_esc(row.get('HighL',''))}' onfocus='onLimitFocus(this)' oninput='onLimitChange(this,\"usl\")' onblur='onLimitBlur()'></td>"
+            f"<td class='chg-cell'>No</td>"
+            f"<td class='st-cell'></td>"
             f"<td>{col_corr_factor}</td>"
             f"<td>{col_verify_error}</td>"
             f"<td>{col_raw_b4final}</td>"
@@ -480,11 +482,24 @@ def generate_summary_html(plot_type: str) -> None:
   thead th input{{display:block;margin-top:4px;width:100%;padding:3px 5px;
                   font-size:11px;border:1px solid #5a7fa0;border-radius:3px;
                   background:#eaf3fb;color:#1a252f;outline:none}}
+  thead th select{{display:block;margin-top:4px;width:100%;padding:3px 4px;
+                   font-size:11px;border:1px solid #5a7fa0;border-radius:3px;
+                   background:#eaf3fb;color:#1a252f;outline:none;cursor:pointer}}
   td{{padding:6px 10px;border-bottom:1px solid #eee;white-space:nowrap}}
   td.param{{white-space:normal;max-width:300px;word-break:break-word}}
   tr:last-child td{{border-bottom:none}}
   tr:nth-child(even) td{{background:#fafafa}}
   tr:hover td{{background:#e8f4fd}}
+  .lim-inp{{width:72px;padding:2px 5px;border:1px solid #b0bec5;border-radius:3px;
+             font-size:12px;text-align:right;background:#fffde7;color:#333;outline:none}}
+  .lim-inp:focus{{border-color:#f9a825;box-shadow:0 0 0 2px rgba(249,168,37,.25)}}
+  td.st-pass{{background:#d4edda!important;color:#155724;font-weight:700;
+               text-align:center;font-size:12px}}
+  td.st-fail{{background:#f8d7da!important;color:#721c24;font-weight:700;
+               text-align:center;font-size:12px}}
+  td.chg-yes{{background:#fff3cd!important;color:#856404;font-weight:700;
+               text-align:center;font-size:12px}}
+  td.chg-cell{{text-align:center;font-size:12px;color:#555}}
   a{{color:#2980b9;text-decoration:none;font-weight:600}}
   a:hover{{text-decoration:underline}}
   .na{{color:#bbb}}
@@ -585,6 +600,10 @@ def generate_summary_html(plot_type: str) -> None:
   <button class="btn-plot" onclick="quickPlot()">&#9654; Plot</button>
 </div>
 
+<div style="margin-bottom:6px">
+  <button id="undo-btn" class="btn" onclick="undoLimitChange()" disabled
+          title="Undo last LSL/USL edit (Ctrl+Z)">&#8630; Undo</button>
+</div>
 <div class="wrap">
 <table id="tbl">
 <thead>
@@ -598,6 +617,16 @@ def generate_summary_html(plot_type: str) -> None:
   <th><div>LowL</div><input class="col-filter" data-col="6" type="text" placeholder=">0 or >=1 <=5" oninput="filterTable()"></th>
   <th><div>MeasureError</div><input class="col-filter" data-col="7" type="text" placeholder=">0.5 <=1.2" oninput="filterTable()"></th>
   <th><div>HighL</div><input class="col-filter" data-col="8" type="text" placeholder=">0 or >=1 <=5" oninput="filterTable()"></th>
+  <th><div>Changes</div><select class="col-filter-sel" data-col="9" onchange="filterTable()">
+    <option value="">All</option>
+    <option value="Yes">Yes</option>
+    <option value="No">No</option>
+  </select></th>
+  <th><div>Status</div><select class="col-filter-sel" data-col="10" onchange="filterTable()">
+    <option value="">All</option>
+    <option value="Pass">Pass</option>
+    <option value="Fail">Fail</option>
+  </select></th>
   <th class="lk">Corr_Factor</th>
   <th class="lk">Verify_Error</th>
   <th class="lk">Raw_B4Final</th>
@@ -1019,6 +1048,103 @@ function globToRegex(pat) {{
                .replace(/\\?/g, '.');
   return new RegExp('^' + esc + '$', 'i');
 }}
+// ── LSL/USL undo stack ────────────────────────────────────────────────────
+var _undoStack = [];
+var _focusSnapshot = null;
+function onLimitFocus(inp) {{
+  var param = inp.dataset.param, ftype = inp.dataset.ftype;
+  var snap = [];
+  document.querySelectorAll('#tbl tbody tr').forEach(function(row) {{
+    var lslInp = row.querySelector('.lsl-inp');
+    if (!lslInp || lslInp.dataset.param !== param || lslInp.dataset.ftype !== ftype) return;
+    snap.push({{row: row, lsl: lslInp.value, usl: row.querySelector('.usl-inp').value}});
+  }});
+  _focusSnapshot = snap;
+}}
+function onLimitBlur() {{
+  if (!_focusSnapshot) return;
+  var changed = _focusSnapshot.some(function(s) {{
+    var l = s.row.querySelector('.lsl-inp'), u = s.row.querySelector('.usl-inp');
+    return (l && l.value !== s.lsl) || (u && u.value !== s.usl);
+  }});
+  if (changed) {{ _undoStack.push(_focusSnapshot); updateUndoBtn(); }}
+  _focusSnapshot = null;
+}}
+function undoLimitChange() {{
+  if (!_undoStack.length) return;
+  var snap = _undoStack.pop();
+  snap.forEach(function(s) {{
+    var l = s.row.querySelector('.lsl-inp'), u = s.row.querySelector('.usl-inp');
+    if (l) l.value = s.lsl;
+    if (u) u.value = s.usl;
+    updateChangesCell(s.row);
+    updateRowStatus(s.row);
+  }});
+  updateUndoBtn();
+}}
+function updateUndoBtn() {{
+  var btn = document.getElementById('undo-btn');
+  if (!btn) return;
+  btn.disabled = !_undoStack.length;
+  btn.title = _undoStack.length
+    ? 'Undo last LSL/USL edit (' + _undoStack.length + ' step(s)) — Ctrl+Z'
+    : 'Nothing to undo';
+}}
+document.addEventListener('keydown', function(e) {{
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {{
+    if (document.activeElement && document.activeElement.classList.contains('lim-inp')) return;
+    e.preventDefault();
+    undoLimitChange();
+  }}
+}});
+function getCellText(cell) {{
+  var inp = cell.querySelector('.lim-inp');
+  return inp ? inp.value.trim() : cell.textContent.trim();
+}}
+function calcStatus(lsl, measure, usl) {{
+  var m = parseFloat(measure);
+  if (isNaN(m)) return '';
+  var lo = parseFloat(lsl), hi = parseFloat(usl);
+  var ok = (!isNaN(lo) ? m >= lo : true) && (!isNaN(hi) ? m <= hi : true);
+  return ok ? 'Pass' : 'Fail';
+}}
+function updateChangesCell(row) {{
+  var cells = row.querySelectorAll('td');
+  var lslInp = cells[6].querySelector('.lsl-inp');
+  var uslInp = cells[8].querySelector('.usl-inp');
+  var changed = (lslInp && lslInp.value !== lslInp.dataset.orig) ||
+                (uslInp && uslInp.value !== uslInp.dataset.orig);
+  cells[9].textContent = changed ? 'Yes' : 'No';
+  cells[9].className   = changed ? 'chg-yes' : 'chg-cell';
+}}
+function updateRowStatus(row) {{
+  var cells = row.querySelectorAll('td');
+  var lslInp = cells[6].querySelector('.lsl-inp');
+  var uslInp = cells[8].querySelector('.usl-inp');
+  var lsl  = lslInp ? lslInp.value : '';
+  var meas = cells[7].textContent.trim();
+  var usl  = uslInp ? uslInp.value : '';
+  var st   = calcStatus(lsl, meas, usl);
+  cells[10].textContent = st;
+  cells[10].className  = st === 'Pass' ? 'st-pass' : (st === 'Fail' ? 'st-fail' : 'st-cell');
+}}
+function onLimitChange(inp, type) {{
+  var param = inp.dataset.param;
+  var ftype = inp.dataset.ftype;
+  var val   = inp.value;
+  document.querySelectorAll('#tbl tbody tr').forEach(function(row) {{
+    var ref = row.querySelector('.lsl-inp');
+    if (!ref || ref.dataset.param !== param || ref.dataset.ftype !== ftype) return;
+    if (type === 'lsl') {{
+      if (ref !== inp) ref.value = val;
+    }} else {{
+      var uslInp = row.querySelector('.usl-inp');
+      if (uslInp && uslInp !== inp) uslInp.value = val;
+    }}
+    updateChangesCell(row);
+    updateRowStatus(row);
+  }});
+}}
 function filterTable() {{
   var NUMERIC_COLS = {{6: true, 7: true, 8: true}};
   var filters = [];
@@ -1033,15 +1159,26 @@ function filterTable() {{
     var re = globToRegex(raw);
     if (re) filters.push({{col: col, re: re}});
   }});
+  document.querySelectorAll('.col-filter-sel').forEach(function(sel) {{
+    var val = sel.value;
+    if (!val) return;
+    filters.push({{col: parseInt(sel.dataset.col, 10), exact: val}});
+  }});
   document.querySelectorAll('#tbl tbody tr').forEach(function(row) {{
     var cells = row.querySelectorAll('td');
     var show = filters.every(function(f) {{
-      var text = cells[f.col].textContent.trim();
+      var text = getCellText(cells[f.col]);
+      if (f.exact) return text === f.exact;
       return f.conds ? applyNumericFilter(f.conds, text) : f.re.test(text);
     }});
     row.style.display = show ? '' : 'none';
   }});
 }}
+// Initialise Changes and Status columns on page load
+document.querySelectorAll('#tbl tbody tr').forEach(function(row) {{
+  updateChangesCell(row);
+  updateRowStatus(row);
+}});
 function parseNumericFilter(expr) {{
   /* Parse expressions like: >3  >=2.5  <10  <=4  >1 <=5  (space-separated AND) */
   var parts = expr.trim().split(/\s+/);
