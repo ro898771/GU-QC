@@ -48,7 +48,7 @@ def _force_delete(path: str) -> None:
 # ── paths ──────────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-folder_input = input("Enter the GUFILE folder path (absolute or relative to project root): ").strip()
+folder_input = input("Enter the GUFILE folder path (absolute or relative to project root): ").strip().strip('"').strip("'")
 
 if os.path.isabs(folder_input):
     GUFILE_DIR = folder_input
@@ -270,9 +270,15 @@ FAIL_CF_RE = re.compile(
 DEVICE_RE = re.compile(r"GU Device #(\d+) being run")
 
 # ── main processing ────────────────────────────────────────────────────────────
-zip_files = sorted(
-    f for f in os.listdir(GUFILE_DIR) if f.lower().endswith(".zip")
-)
+_top_zips = [f for f in os.listdir(GUFILE_DIR) if f.lower().endswith(".zip")]
+_sub_zips = [
+    os.path.join(sub, f)
+    for sub in os.listdir(GUFILE_DIR)
+    if os.path.isdir(os.path.join(GUFILE_DIR, sub))
+    for f in os.listdir(os.path.join(GUFILE_DIR, sub))
+    if f.lower().endswith(".zip")
+]
+zip_files = sorted(_top_zips + _sub_zips)
 
 if not zip_files:
     print("No ZIP files found in:", GUFILE_DIR)
