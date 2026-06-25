@@ -79,8 +79,10 @@ def generate_summary_html(plot_type: str) -> None:
             (row["ParamName"], row["FailType"]): (i // PER_PAGE) + 1
             for i, (_, row) in enumerate(param_specs.iterrows())
         }
+        _fail_counts = df.groupby(["ParamName", "FailType"]).size().rename("FailedCount")
+        param_specs = param_specs.join(_fail_counts, on=["ParamName", "FailType"])
         modal_json = json.dumps(
-            [{"p": r["ParamName"], "f": r["FailType"]}
+            [{"p": r["ParamName"], "f": r["FailType"], "c": int(r["FailedCount"])}
              for _, r in param_specs.iterrows()],
             ensure_ascii=False,
         )
@@ -674,6 +676,7 @@ def generate_summary_html(plot_type: str) -> None:
       <th>#</th>
       <th><div>ParamName</div><input class="up-col-filter" data-col="1" type="text" placeholder="e.g. F_RL*" oninput="filterUpParams()"></th>
       <th><div>FailType</div><input class="up-col-filter" data-col="2" type="text" placeholder="filter..." oninput="filterUpParams()"></th>
+      <th><div>Failed Count</div><input class="up-col-filter" data-col="3" type="text" placeholder="filter..." oninput="filterUpParams()"></th>
     </tr></thead>
     <tbody id="modal-tbody"></tbody></table>
     </div>
@@ -800,7 +803,7 @@ function toggleQpZoom() {{
 // ── Unique Params modal ───────────────────────────────────────────────────
 function renderUpParams() {{
   document.getElementById('modal-tbody').innerHTML = UNIQUE_PARAMS.map(function(r, i) {{
-    return '<tr><td>' + (i + 1) + '</td><td>' + r.p + '</td><td>' + r.f + '</td></tr>';
+    return '<tr><td>' + (i + 1) + '</td><td>' + r.p + '</td><td>' + r.f + '</td><td>' + r.c + '</td></tr>';
   }}).join('');
   document.getElementById('up-count').textContent = String(UNIQUE_PARAMS.length);
 }}
@@ -835,7 +838,7 @@ function exportUpParams() {{
     var cells = row.querySelectorAll('td');
     rows.push(Array.from(cells).map(function(c) {{ return csvCell(c.textContent.trim()); }}).join(','));
   }});
-  var csv = 'No,ParamName,FailType\\n' + rows.join('\\n');
+  var csv = 'No,ParamName,FailType,FailedCount\\n' + rows.join('\\n');
   downloadBlob(csv, 'UniqueParams.csv', 'text/csv');
 }}
 var _upZoomed = false;

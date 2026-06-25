@@ -269,6 +269,29 @@ FAIL_CF_RE = re.compile(
 # Device context line preceding Corr-factor failures
 DEVICE_RE = re.compile(r"GU Device #(\d+) being run")
 
+# ── rename .gucal → .zip before discovery ─────────────────────────────────────
+_gucal_renamed = []
+for _fname in os.listdir(GUFILE_DIR):
+    if _fname.lower().endswith(".gucal"):
+        _src = os.path.join(GUFILE_DIR, _fname)
+        _dst = os.path.join(GUFILE_DIR, _fname[:-6] + ".zip")
+        os.rename(_src, _dst)
+        _gucal_renamed.append(_fname)
+for _sub in os.listdir(GUFILE_DIR):
+    _sub_path = os.path.join(GUFILE_DIR, _sub)
+    if os.path.isdir(_sub_path):
+        for _fname in os.listdir(_sub_path):
+            if _fname.lower().endswith(".gucal"):
+                _src = os.path.join(_sub_path, _fname)
+                _dst = os.path.join(_sub_path, _fname[:-6] + ".zip")
+                os.rename(_src, _dst)
+                _gucal_renamed.append(os.path.join(_sub, _fname))
+if _gucal_renamed:
+    print(f"Renamed {len(_gucal_renamed)} .gucal file(s) to .zip:")
+    for _r in _gucal_renamed:
+        print(f"  {_r}")
+    print()
+
 # ── main processing ────────────────────────────────────────────────────────────
 _top_zips = [f for f in os.listdir(GUFILE_DIR) if f.lower().endswith(".zip")]
 _sub_zips = [
