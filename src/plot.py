@@ -582,6 +582,18 @@ def generate_summary_html(plot_type: str) -> None:
   .qp-cell-title{{font-size:12px;font-weight:bold;color:#2c3e50;margin-bottom:6px;
                   text-transform:uppercase;letter-spacing:.5px}}
   .qp-no-data{{color:#999;text-align:center;padding:40px 0;font-size:13px}}
+  .qp-cell-title-bar{{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}}
+  .btn-remove-unit{{background:#c0392b;color:#fff;border:none;padding:3px 8px;border-radius:3px;
+                    cursor:pointer;font-size:11px;white-space:nowrap}}
+  .btn-remove-unit:hover{{background:#922b21}}
+  .btn-remove-unit:disabled{{background:#bdc3c7;cursor:default}}
+  #qp-removed-panel{{margin-top:14px;background:#fff5f5;border:1px solid #f5c6cb;
+                      border-radius:6px;padding:10px 12px}}
+  #qp-removed-table{{border-collapse:collapse;width:100%;font-size:12px}}
+  #qp-removed-table th{{background:#c0392b;color:#fff;padding:6px 10px;text-align:left;
+                         white-space:nowrap;position:sticky;top:0;z-index:1}}
+  #qp-removed-table td{{padding:5px 10px;border-bottom:1px solid #f5c6cb;white-space:nowrap}}
+  #qp-removed-table tr:nth-child(even) td{{background:#fff0f0}}
 </style>
 </head>
 <body>
@@ -734,32 +746,46 @@ def generate_summary_html(plot_type: str) -> None:
     </div>
     <div id="qp-grid" class="qp-grid">
       <div class="qp-cell">
-        <div class="qp-cell-title">Corr Factor</div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Corr Factor</span><button class="btn-remove-unit" id="rm-qp-cf" onclick="removeSelectedUnit('cf','qp-cf','CorrFactor')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-cf"></div>
       </div>
       <div class="qp-cell">
-        <div class="qp-cell-title">Verify Error</div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Verify Error</span><button class="btn-remove-unit" id="rm-qp-ve" onclick="removeSelectedUnit('ve','qp-ve','VrfyError')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-ve"></div>
       </div>
       <div class="qp-cell">
-        <div class="qp-cell-title">Raw Before Final (CorrRaw)</div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Raw Before Final (CorrRaw)</span><button class="btn-remove-unit" id="rm-qp-cr" onclick="removeSelectedUnit('cr','qp-cr','CorrRaw')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-cr"></div>
       </div>
       <div class="qp-cell">
-        <div class="qp-cell-title">Raw Before Verify (VryRaw)</div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Raw Before Verify (VryRaw)</span><button class="btn-remove-unit" id="rm-qp-vr" onclick="removeSelectedUnit('vr','qp-vr','VryRaw')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-vr"></div>
       </div>
       <div class="qp-cell">
-        <div class="qp-cell-title">Ref Final Data</div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Ref Final Data</span><button class="btn-remove-unit" id="rm-qp-rf" onclick="removeSelectedUnit('rf','qp-rf','RefFinal')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-rf"></div>
       </div>
       <div class="qp-cell">
-        <div class="qp-cell-title">Vrfy Data</div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Vrfy Data</span><button class="btn-remove-unit" id="rm-qp-vd" onclick="removeSelectedUnit('vd','qp-vd','VrfyData')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-vd"></div>
       </div>
       <div class="qp-cell">
-        <div class="qp-cell-title">Corr Coeff</div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Corr Coeff</span><button class="btn-remove-unit" id="rm-qp-cc" onclick="removeSelectedUnit('cc','qp-cc','CorrCoeff')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-cc"></div>
+      </div>
+    </div>
+    <div id="qp-removed-panel" style="display:none;margin-top:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span style="font-weight:600;color:#c0392b;font-size:13px">&#9888; Removed Units (<span id="qp-removed-count">0</span>)</span>
+        <div style="display:flex;gap:6px">
+          <button id="qp-undo-btn" class="btn-qp-zoom" onclick="undoRemoveUnit()" disabled title="Undo last removal (Ctrl+Z)">&#8630; Undo</button>
+          <button class="btn-export" onclick="exportRemovedUnits()">&#8595; Export CSV</button>
+        </div>
+      </div>
+      <div style="overflow:auto;max-height:180px">
+        <table id="qp-removed-table"><thead><tr>
+          <th>#</th><th>ParamName</th><th>Source</th><th>PID</th><th>TesterName</th><th>ZipFile</th><th>Value</th>
+        </tr></thead><tbody id="qp-removed-tbody"></tbody></table>
       </div>
     </div>
     <div id="qp-table-wrap" style="display:none"></div>
@@ -783,8 +809,14 @@ function closeQp() {{
   }}
 }}
 
-var _qpZoomed   = false;
-var _qpHasPlot  = false;
+var _qpZoomed      = false;
+var _qpHasPlot     = false;
+var _currentParam  = '';
+var _selectedPoint = {{}};
+var _removedUnits      = [];
+var _removedMask       = {{}};
+var _removeUndoStack   = [];
+var _currentLimits = {{}};
 
 function toggleQpZoom() {{
   _qpZoomed = !_qpZoomed;
@@ -970,6 +1002,26 @@ function quickPlot() {{
           '\\n\\nCheck the parameter name and try again.');
     return;
   }}
+  if (_currentParam !== param) {{
+    _selectedPoint = {{}};
+    _removedUnits    = [];
+    _removedMask     = {{}};
+    _removeUndoStack = [];
+    renderRemovedTable();
+    ['qp-cf','qp-ve','qp-cr','qp-vr','qp-rf','qp-vd','qp-cc'].forEach(function(id) {{
+      var b = document.getElementById('rm-' + id); if (b) b.disabled = true;
+    }});
+  }}
+  _currentParam  = param;
+  _currentLimits = {{
+    cf: {{lowL: d.cfLowL, highL: d.cfHighL}},
+    ve: {{lowL: d.veLowL, highL: d.veHighL}},
+    cr: {{lowL: null,     highL: null}},
+    vr: {{lowL: null,     highL: null}},
+    rf: {{lowL: null,     highL: null}},
+    vd: {{lowL: null,     highL: null}},
+    cc: {{lowL: d.ccLowL, highL: d.ccHighL}},
+  }};
   _qpHasPlot = true;
   document.getElementById('qp-title').textContent = 'Quick Plot: ' + param;
   document.getElementById('qpmodal').classList.add('open');
@@ -979,33 +1031,41 @@ function quickPlot() {{
   if (isTable) {{
     renderTable(param, d);
   }} else {{
-    renderChart('qp-cf', d.cf, d.cfLowL,  d.cfHighL,  type);
-    renderChart('qp-ve', d.ve, d.veLowL,  d.veHighL,  type);
-    renderChart('qp-cr', d.cr, null,      null,        type);
-    renderChart('qp-vr', d.vr, null,      null,        type);
-    renderChart('qp-rf', d.rf, null,      null,        type);
-    renderChart('qp-vd', d.vd, null,      null,        type);
-    renderChart('qp-cc', d.cc, d.ccLowL,  d.ccHighL,  type);
+    renderChart('qp-cf', d.cf, d.cfLowL,  d.cfHighL,  type, 'cf');
+    renderChart('qp-ve', d.ve, d.veLowL,  d.veHighL,  type, 've');
+    renderChart('qp-cr', d.cr, null,      null,        type, 'cr');
+    renderChart('qp-vr', d.vr, null,      null,        type, 'vr');
+    renderChart('qp-rf', d.rf, null,      null,        type, 'rf');
+    renderChart('qp-vd', d.vd, null,      null,        type, 'vd');
+    renderChart('qp-cc', d.cc, d.ccLowL,  d.ccHighL,  type, 'cc');
   }}
 }}
 
-function renderChart(divId, grouped, lowL, highL, type) {{
+function renderChart(divId, grouped, lowL, highL, type, srcKey) {{
   var el = document.getElementById(divId);
   if (!grouped || Object.keys(grouped).length === 0) {{
     el.innerHTML = '<div class="qp-no-data">No data available</div>';
+    var rmBtn = document.getElementById('rm-' + divId);
+    if (rmBtn) rmBtn.disabled = true;
     return;
   }}
-  var testers = Object.keys(grouped).sort();
-  var traces  = [];
+  var testers  = Object.keys(grouped).sort();
+  var traces   = [];
+  var srcMask  = (srcKey && _removedMask[srcKey]) || {{}};
   testers.forEach(function(tester, ci) {{
-    var d      = grouped[tester];
-    var vals   = d.v;
-    var pids   = d.p;
-    var arms   = d.a;
+    var d          = grouped[tester];
+    var removedSet = srcMask[tester] || new Set();
+    var indices    = [];
+    for (var ii = 0; ii < d.v.length; ii++) {{
+      if (!removedSet.has(ii)) indices.push(ii);
+    }}
+    var vals   = indices.map(function(i) {{ return d.v[i]; }});
+    var pids   = d.p ? indices.map(function(i) {{ return d.p[i]; }}) : null;
+    var arms   = d.a ? indices.map(function(i) {{ return d.a[i]; }}) : null;
     var colour = PALETTE[ci % PALETTE.length];
-    var htexts = vals.map(function(v, i) {{
-      return '<b>PID:</b> '   + (pids ? pids[i] : i + 1) + '<br>'
-           + '<b>ArmNo:</b> ' + (arms ? arms[i] : 'N/A') + '<br>'
+    var htexts = vals.map(function(v, ii) {{
+      return '<b>PID:</b> '   + (pids ? pids[ii] : indices[ii] + 1) + '<br>'
+           + '<b>ArmNo:</b> ' + (arms ? arms[ii] : 'N/A') + '<br>'
            + '<b>Value:</b> ' + v;
     }});
     if (type === 'box') {{
@@ -1015,7 +1075,7 @@ function renderChart(divId, grouped, lowL, highL, type) {{
         marker: {{color: colour, size: 5, opacity: 0.6}},
         line: {{color: colour}},
         fillcolor: 'rgba(255,255,255,0.6)',
-        text: htexts,
+        text: htexts, customdata: indices,
         hovertemplate: '%{{text}}<extra></extra>',
       }});
     }} else {{
@@ -1025,7 +1085,7 @@ function renderChart(divId, grouped, lowL, highL, type) {{
         y: vals, name: tester, mode: 'lines+markers',
         marker: {{color: colour, size: 5}},
         line: {{color: colour}},
-        text: htexts,
+        text: htexts, customdata: indices,
         hovertemplate: '%{{text}}<extra></extra>',
       }});
     }}
@@ -1057,6 +1117,108 @@ function renderChart(divId, grouped, lowL, highL, type) {{
     hovermode: 'closest',
   }};
   Plotly.newPlot(el, traces, layout, {{responsive: true, displayModeBar: false}});
+  if (srcKey) {{
+    el.on('plotly_click', function(data) {{
+      if (!data.points || !data.points.length) return;
+      var pt = data.points[0];
+      if (pt.customdata === undefined || pt.customdata === null) return;
+      _selectedPoint[divId] = {{
+        tester:     pt.fullData.name,
+        pointIndex: pt.customdata,
+        srcKey:     srcKey,
+      }};
+      var rmBtn = document.getElementById('rm-' + divId);
+      if (rmBtn) rmBtn.disabled = false;
+    }});
+  }}
+}}
+
+function removeSelectedUnit(srcKey, divId, srcLabel) {{
+  var sel = _selectedPoint[divId];
+  if (!sel) {{ alert('Click a data point on this chart first.'); return; }}
+  var param  = _currentParam;
+  var tester = sel.tester;
+  var pi     = sel.pointIndex;
+  var d = PLOT_DATA[param];
+  if (!d || !d[srcKey] || !d[srcKey][tester]) return;
+  var tData = d[srcKey][tester];
+  if (!_removedMask[srcKey]) _removedMask[srcKey] = {{}};
+  if (!_removedMask[srcKey][tester]) _removedMask[srcKey][tester] = new Set();
+  if (_removedMask[srcKey][tester].has(pi)) {{ alert('This unit is already removed.'); return; }}
+  _removedMask[srcKey][tester].add(pi);
+  _removedUnits.push({{
+    param:  param,
+    source: srcLabel,
+    pid:    tData.p ? String(tData.p[pi]) : String(pi + 1),
+    tester: tester,
+    zip:    tData.z ? String(tData.z[pi]) : '',
+    value:  tData.v ? tData.v[pi] : '',
+  }});
+  _removeUndoStack.push({{srcKey: srcKey, tester: tester, pointIndex: pi, divId: divId}});
+  delete _selectedPoint[divId];
+  var rmBtn = document.getElementById('rm-' + divId);
+  if (rmBtn) rmBtn.disabled = true;
+  var undoBtn = document.getElementById('qp-undo-btn');
+  if (undoBtn) undoBtn.disabled = false;
+  var lims = _currentLimits[srcKey] || {{lowL: null, highL: null}};
+  var type = document.getElementById('qp-type').value;
+  renderChart(divId, d[srcKey], lims.lowL, lims.highL, type, srcKey);
+  renderRemovedTable();
+}}
+
+function undoRemoveUnit() {{
+  if (!_removeUndoStack.length) return;
+  var last = _removeUndoStack.pop();
+  _removedUnits.pop();
+  if (_removedMask[last.srcKey] && _removedMask[last.srcKey][last.tester]) {{
+    _removedMask[last.srcKey][last.tester].delete(last.pointIndex);
+  }}
+  var undoBtn = document.getElementById('qp-undo-btn');
+  if (undoBtn) undoBtn.disabled = (_removeUndoStack.length === 0);
+  var d    = PLOT_DATA[_currentParam];
+  var lims = _currentLimits[last.srcKey] || {{lowL: null, highL: null}};
+  var type = document.getElementById('qp-type').value;
+  if (d && d[last.srcKey]) {{
+    renderChart(last.divId, d[last.srcKey], lims.lowL, lims.highL, type, last.srcKey);
+  }}
+  renderRemovedTable();
+}}
+
+function renderRemovedTable() {{
+  var panel = document.getElementById('qp-removed-panel');
+  var tbody = document.getElementById('qp-removed-tbody');
+  if (!panel || !tbody) return;
+  if (!_removedUnits.length) {{ panel.style.display = 'none'; return; }}
+  panel.style.display = 'block';
+  document.getElementById('qp-removed-count').textContent = String(_removedUnits.length);
+  function esc(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }}
+  tbody.innerHTML = _removedUnits.map(function(r, i) {{
+    return '<tr>'
+      + '<td>' + (i + 1)        + '</td>'
+      + '<td>' + esc(r.param)   + '</td>'
+      + '<td>' + esc(r.source)  + '</td>'
+      + '<td>' + esc(r.pid)     + '</td>'
+      + '<td>' + esc(r.tester)  + '</td>'
+      + '<td>' + esc(r.zip)     + '</td>'
+      + '<td>' + esc(r.value)   + '</td>'
+      + '</tr>';
+  }}).join('');
+}}
+
+function exportRemovedUnits() {{
+  if (!_removedUnits.length) {{ alert('No removed units to export.'); return; }}
+  function csvCell(v) {{
+    var s = String(v);
+    return (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\\n') >= 0)
+           ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }}
+  var hdr  = 'ParamName,Source,PID,TesterName,ZipFile,Value';
+  var rows = _removedUnits.map(function(r) {{
+    return [r.param, r.source, r.pid, r.tester, r.zip, r.value].map(csvCell).join(',');
+  }});
+  downloadBlob(hdr + '\\n' + rows.join('\\n'),
+    (_currentParam || 'removed').replace(/[^a-zA-Z0-9_-]/g,'_') + '_removed_units.csv',
+    'text/csv');
 }}
 
 function globToRegex(pat) {{
@@ -1115,7 +1277,11 @@ document.addEventListener('keydown', function(e) {{
   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {{
     if (document.activeElement && document.activeElement.classList.contains('lim-inp')) return;
     e.preventDefault();
-    undoLimitChange();
+    if (document.getElementById('qpmodal').classList.contains('open')) {{
+      undoRemoveUnit();
+    }} else {{
+      undoLimitChange();
+    }}
   }}
 }});
 function getCellText(cell) {{
