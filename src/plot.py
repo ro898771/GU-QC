@@ -383,7 +383,7 @@ def generate_summary_html(plot_type: str) -> None:
 
     # ── Build table rows ──────────────────────────────────────────────────────
     rows_html = []
-    for _, row in df.iterrows():
+    for _row_num, (_, row) in enumerate(df.iterrows(), start=1):
         param     = row.get("ParamName", "")
         fail_type = str(row.get("FailType", ""))
         page      = all_pages.get((param, fail_type), 1)
@@ -395,6 +395,7 @@ def generate_summary_html(plot_type: str) -> None:
 
         rows_html.append(
             f"<tr>"
+            f"<td style='text-align:center;color:#888'>{_row_num}</td>"
             f"<td>{_esc(row.get('TesterName',''))}</td>"
             f"<td>{_esc(row.get('Product',''))}</td>"
             f"<td>{_esc(row.get('Sublot',''))}</td>"
@@ -418,7 +419,7 @@ def generate_summary_html(plot_type: str) -> None:
     details_path = "../../Info/TzerMingCalculation.png"
 
     _no_fail_row = (
-        "<tr><td colspan='17' style='text-align:center;padding:30px;"
+        "<tr><td colspan='18' style='text-align:center;padding:30px;"
         "color:#27ae60;font-weight:600;font-size:15px'>"
         "&#10003; All Pass &#8212; No failures detected. Use Quick Plot above to inspect parameters."
         "</td></tr>"
@@ -579,10 +580,16 @@ def generate_summary_html(plot_type: str) -> None:
   .qp-header h2{{font-size:15px;color:#2c3e50;margin:0}}
   .qp-grid{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}
   .qp-cell{{background:#f8f9fa;border-radius:6px;padding:10px 12px}}
-  .qp-cell-title{{font-size:12px;font-weight:bold;color:#2c3e50;margin-bottom:6px;
-                  text-transform:uppercase;letter-spacing:.5px}}
+  .qp-cell-title{{font-size:12px;font-weight:bold;color:#2c3e50;
+                  text-transform:uppercase;letter-spacing:.5px;flex:1}}
   .qp-no-data{{color:#999;text-align:center;padding:40px 0;font-size:13px}}
-  .qp-cell-title-bar{{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}}
+  .qp-cell-title-bar{{display:flex;align-items:center;gap:4px;margin-bottom:6px}}
+  .btn-box-xmode{{background:#6c757d;color:#fff;border:none;padding:3px 8px;border-radius:3px;
+                  font-size:11px;cursor:pointer}}
+  .btn-box-xmode:hover{{background:#5a6268}}
+  .btn-expand-chart{{background:#1a6b9a;color:#fff;border:none;padding:3px 8px;border-radius:3px;
+                     font-size:11px;cursor:pointer}}
+  .btn-expand-chart:hover{{background:#155a82}}
   .btn-remove-unit{{background:#c0392b;color:#fff;border:none;padding:3px 8px;border-radius:3px;
                     cursor:pointer;font-size:11px;white-space:nowrap}}
   .btn-remove-unit:hover{{background:#922b21}}
@@ -640,21 +647,22 @@ def generate_summary_html(plot_type: str) -> None:
 <table id="tbl">
 <thead>
 <tr>
-  <th><div>TesterName</div><input class="col-filter" data-col="0" type="text" placeholder="e.g. F_RL*" oninput="filterTable()"></th>
-  <th><div>Product</div><input class="col-filter" data-col="1" type="text" placeholder="Filter..." oninput="filterTable()"></th>
-  <th><div>Sublot</div><input class="col-filter" data-col="2" type="text" placeholder="Filter..." oninput="filterTable()"></th>
-  <th><div>Device</div><input class="col-filter" data-col="3" type="text" placeholder="Filter..." oninput="filterTable()"></th>
-  <th><div>FailType</div><input class="col-filter" data-col="4" type="text" placeholder="Filter..." oninput="filterTable()"></th>
-  <th><div>ParamName</div><input class="col-filter" data-col="5" type="text" placeholder="e.g. F_RL*" oninput="filterTable()"></th>
-  <th><div>LowL</div><input class="col-filter" data-col="6" type="text" placeholder=">0 or >=1 <=5" oninput="filterTable()"></th>
-  <th><div>MeasureError</div><input class="col-filter" data-col="7" type="text" placeholder=">0.5 <=1.2" oninput="filterTable()"></th>
-  <th><div>HighL</div><input class="col-filter" data-col="8" type="text" placeholder=">0 or >=1 <=5" oninput="filterTable()"></th>
-  <th><div>Changes</div><select class="col-filter-sel" data-col="9" onchange="filterTable()">
+  <th style="text-align:center">#</th>
+  <th><div>TesterName</div><input class="col-filter" data-col="1" type="text" placeholder="e.g. F_RL*" oninput="filterTable()"></th>
+  <th><div>Product</div><input class="col-filter" data-col="2" type="text" placeholder="Filter..." oninput="filterTable()"></th>
+  <th><div>Sublot</div><input class="col-filter" data-col="3" type="text" placeholder="Filter..." oninput="filterTable()"></th>
+  <th><div>Device</div><input class="col-filter" data-col="4" type="text" placeholder="Filter..." oninput="filterTable()"></th>
+  <th><div>FailType</div><input class="col-filter" data-col="5" type="text" placeholder="Filter..." oninput="filterTable()"></th>
+  <th><div>ParamName</div><input class="col-filter" data-col="6" type="text" placeholder="e.g. F_RL*" oninput="filterTable()"></th>
+  <th><div>LowL</div><input class="col-filter" data-col="7" type="text" placeholder=">0 or >=1 <=5" oninput="filterTable()"></th>
+  <th><div>MeasureError</div><input class="col-filter" data-col="8" type="text" placeholder=">0.5 <=1.2" oninput="filterTable()"></th>
+  <th><div>HighL</div><input class="col-filter" data-col="9" type="text" placeholder=">0 or >=1 <=5" oninput="filterTable()"></th>
+  <th><div>Changes</div><select class="col-filter-sel" data-col="10" onchange="filterTable()">
     <option value="">All</option>
     <option value="Yes">Yes</option>
     <option value="No">No</option>
   </select></th>
-  <th><div>Status</div><select class="col-filter-sel" data-col="10" onchange="filterTable()">
+  <th><div>Status</div><select class="col-filter-sel" data-col="11" onchange="filterTable()">
     <option value="">All</option>
     <option value="Pass">Pass</option>
     <option value="Fail">Fail</option>
@@ -746,32 +754,48 @@ def generate_summary_html(plot_type: str) -> None:
     </div>
     <div id="qp-grid" class="qp-grid">
       <div class="qp-cell">
-        <div class="qp-cell-title-bar"><span class="qp-cell-title">Corr Factor</span><button class="btn-remove-unit" id="rm-qp-cf" onclick="removeSelectedUnit('cf','qp-cf','CorrFactor')" disabled>&#10006; Remove Unit</button></div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Corr Factor</span><button class="btn-box-xmode" id="xm-qp-cf" onclick="toggleBoxXMode('cf','qp-cf')" style="display:none">ZipIndex</button><button class="btn-expand-chart" onclick="expandChart('cf','qp-cf','Corr Factor')">&#10697; Expand</button><button class="btn-remove-unit" id="rm-qp-cf" onclick="removeSelectedUnit('cf','qp-cf','CorrFactor')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-cf"></div>
       </div>
       <div class="qp-cell">
-        <div class="qp-cell-title-bar"><span class="qp-cell-title">Verify Error</span><button class="btn-remove-unit" id="rm-qp-ve" onclick="removeSelectedUnit('ve','qp-ve','VrfyError')" disabled>&#10006; Remove Unit</button></div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Verify Error</span><button class="btn-box-xmode" id="xm-qp-ve" onclick="toggleBoxXMode('ve','qp-ve')" style="display:none">ZipIndex</button><button class="btn-expand-chart" onclick="expandChart('ve','qp-ve','Verify Error')">&#10697; Expand</button><button class="btn-remove-unit" id="rm-qp-ve" onclick="removeSelectedUnit('ve','qp-ve','VrfyError')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-ve"></div>
       </div>
       <div class="qp-cell">
-        <div class="qp-cell-title-bar"><span class="qp-cell-title">Raw Before Final (CorrRaw)</span><button class="btn-remove-unit" id="rm-qp-cr" onclick="removeSelectedUnit('cr','qp-cr','CorrRaw')" disabled>&#10006; Remove Unit</button></div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Raw Before Final (CorrRaw)</span><button class="btn-box-xmode" id="xm-qp-cr" onclick="toggleBoxXMode('cr','qp-cr')" style="display:none">ZipIndex</button><button class="btn-expand-chart" onclick="expandChart('cr','qp-cr','Raw Before Final')">&#10697; Expand</button><button class="btn-remove-unit" id="rm-qp-cr" onclick="removeSelectedUnit('cr','qp-cr','CorrRaw')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-cr"></div>
       </div>
       <div class="qp-cell">
-        <div class="qp-cell-title-bar"><span class="qp-cell-title">Raw Before Verify (VryRaw)</span><button class="btn-remove-unit" id="rm-qp-vr" onclick="removeSelectedUnit('vr','qp-vr','VryRaw')" disabled>&#10006; Remove Unit</button></div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Raw Before Verify (VryRaw)</span><button class="btn-box-xmode" id="xm-qp-vr" onclick="toggleBoxXMode('vr','qp-vr')" style="display:none">ZipIndex</button><button class="btn-expand-chart" onclick="expandChart('vr','qp-vr','Raw Before Verify')">&#10697; Expand</button><button class="btn-remove-unit" id="rm-qp-vr" onclick="removeSelectedUnit('vr','qp-vr','VryRaw')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-vr"></div>
       </div>
       <div class="qp-cell">
-        <div class="qp-cell-title-bar"><span class="qp-cell-title">Ref Final Data</span><button class="btn-remove-unit" id="rm-qp-rf" onclick="removeSelectedUnit('rf','qp-rf','RefFinal')" disabled>&#10006; Remove Unit</button></div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Ref Final Data</span><button class="btn-box-xmode" id="xm-qp-rf" onclick="toggleBoxXMode('rf','qp-rf')" style="display:none">ZipIndex</button><button class="btn-expand-chart" onclick="expandChart('rf','qp-rf','Ref Final Data')">&#10697; Expand</button><button class="btn-remove-unit" id="rm-qp-rf" onclick="removeSelectedUnit('rf','qp-rf','RefFinal')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-rf"></div>
       </div>
       <div class="qp-cell">
-        <div class="qp-cell-title-bar"><span class="qp-cell-title">Vrfy Data</span><button class="btn-remove-unit" id="rm-qp-vd" onclick="removeSelectedUnit('vd','qp-vd','VrfyData')" disabled>&#10006; Remove Unit</button></div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Vrfy Data</span><button class="btn-box-xmode" id="xm-qp-vd" onclick="toggleBoxXMode('vd','qp-vd')" style="display:none">ZipIndex</button><button class="btn-expand-chart" onclick="expandChart('vd','qp-vd','Vrfy Data')">&#10697; Expand</button><button class="btn-remove-unit" id="rm-qp-vd" onclick="removeSelectedUnit('vd','qp-vd','VrfyData')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-vd"></div>
       </div>
       <div class="qp-cell">
-        <div class="qp-cell-title-bar"><span class="qp-cell-title">Corr Coeff</span><button class="btn-remove-unit" id="rm-qp-cc" onclick="removeSelectedUnit('cc','qp-cc','CorrCoeff')" disabled>&#10006; Remove Unit</button></div>
+        <div class="qp-cell-title-bar"><span class="qp-cell-title">Corr Coeff</span><button class="btn-box-xmode" id="xm-qp-cc" onclick="toggleBoxXMode('cc','qp-cc')" style="display:none">ZipIndex</button><button class="btn-expand-chart" onclick="expandChart('cc','qp-cc','Corr Coeff')">&#10697; Expand</button><button class="btn-remove-unit" id="rm-qp-cc" onclick="removeSelectedUnit('cc','qp-cc','CorrCoeff')" disabled>&#10006; Remove Unit</button></div>
         <div id="qp-cc"></div>
+      </div>
+    </div>
+    <!-- Individual chart expand overlay (inside qpmodal-box so it inherits z-index context) -->
+    <div id="qp-expand-overlay" onclick="if(event.target===this)closeExpandChart()"
+         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);
+                z-index:1100;align-items:center;justify-content:center">
+      <div style="background:#fff;border-radius:8px;padding:16px 20px;
+                  width:92vw;max-width:1300px;max-height:92vh;overflow:auto;
+                  box-shadow:0 6px 32px rgba(0,0,0,.4)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span id="qp-expand-title" style="font-weight:700;font-size:14px;color:#2c3e50"></span>
+          <button onclick="closeExpandChart()"
+                  style="background:#c0392b;color:#fff;border:none;padding:4px 14px;
+                         border-radius:4px;cursor:pointer;font-size:12px">&#10005; Close</button>
+        </div>
+        <div id="qp-expand-chart"></div>
       </div>
     </div>
     <div id="qp-removed-panel" style="display:none;margin-top:14px">
@@ -816,6 +840,8 @@ var _selectedPoint = {{}};
 var _removedUnits      = [];
 var _removedMask       = {{}};
 var _removeUndoStack   = [];
+var _boxXMode          = {{}}; // {{srcKey: 'tester'|'zip'}}
+var _isExpandRender    = false;
 var _currentLimits = {{}};
 
 function toggleQpZoom() {{
@@ -1007,11 +1033,17 @@ function quickPlot() {{
     _removedUnits    = [];
     _removedMask     = {{}};
     _removeUndoStack = [];
+    _boxXMode        = {{}};
     renderRemovedTable();
     ['qp-cf','qp-ve','qp-cr','qp-vr','qp-rf','qp-vd','qp-cc'].forEach(function(id) {{
       var b = document.getElementById('rm-' + id); if (b) b.disabled = true;
     }});
   }}
+  var _isBox = (type === 'box');
+  ['qp-cf','qp-ve','qp-cr','qp-vr','qp-rf','qp-vd','qp-cc'].forEach(function(id) {{
+    var xb = document.getElementById('xm-' + id);
+    if (xb) {{ xb.style.display = _isBox ? 'inline-block' : 'none'; xb.textContent = 'ZipIndex'; }}
+  }});
   _currentParam  = param;
   _currentLimits = {{
     cf: {{lowL: d.cfLowL, highL: d.cfHighL}},
@@ -1039,6 +1071,31 @@ function quickPlot() {{
     renderChart('qp-vd', d.vd, null,      null,        type, 'vd');
     renderChart('qp-cc', d.cc, d.ccLowL,  d.ccHighL,  type, 'cc');
   }}
+}}
+
+function expandChart(srcKey, divId, title) {{
+  var d = PLOT_DATA[_currentParam];
+  if (!d || !d[srcKey]) return;
+  document.getElementById('qp-expand-title').textContent = title + '  —  ' + _currentParam;
+  document.getElementById('qp-expand-overlay').style.display = 'flex';
+  var lims = _currentLimits[srcKey] || {{lowL: null, highL: null}};
+  var type = document.getElementById('qp-type').value;
+  _isExpandRender = true;
+  renderChart('qp-expand-chart', d[srcKey], lims.lowL, lims.highL, type, srcKey);
+  _isExpandRender = false;
+}}
+function closeExpandChart() {{
+  document.getElementById('qp-expand-overlay').style.display = 'none';
+}}
+
+function toggleBoxXMode(srcKey, divId) {{
+  _boxXMode[srcKey] = (_boxXMode[srcKey] === 'zip') ? 'tester' : 'zip';
+  var btn = document.getElementById('xm-' + divId);
+  if (btn) btn.textContent = _boxXMode[srcKey] === 'zip' ? 'TesterName' : 'ZipIndex';
+  var d    = PLOT_DATA[_currentParam];
+  if (!d || !d[srcKey]) return;
+  var lims = _currentLimits[srcKey] || {{lowL: null, highL: null}};
+  renderChart(divId, d[srcKey], lims.lowL, lims.highL, 'box', srcKey);
 }}
 
 function renderChart(divId, grouped, lowL, highL, type, srcKey) {{
@@ -1072,9 +1129,16 @@ function renderChart(divId, grouped, lowL, highL, type, srcKey) {{
            + '<b>ArmNo:</b> '  + (arms ? arms[ii] : 'N/A') + '<br>'
            + '<b>Value:</b> '  + v;
     }});
+    var zipIdxs = vals.map(function(_, ii) {{
+      var zf = zips ? zips[ii] : '';
+      return zf ? zf.replace(/\.[^.]+$/, '').split('_').pop() : String(ii + 1);
+    }});
     if (type === 'box') {{
+      var useZipX = !!(srcKey && _boxXMode[srcKey] === 'zip');
       traces.push({{
-        type: 'box', y: vals, name: tester,
+        type: 'box',
+        x: useZipX ? zipIdxs : undefined,
+        y: vals, name: tester,
         boxpoints: 'all', jitter: 0.4, pointpos: 0,
         marker: {{color: colour, size: 5, opacity: 0.6}},
         line: {{color: colour}},
@@ -1083,13 +1147,17 @@ function renderChart(divId, grouped, lowL, highL, type, srcKey) {{
         hovertemplate: '%{{text}}<extra></extra>',
       }});
     }} else {{
+      var sortOrder = zipIdxs.map(function(zi, ii) {{ return {{zi: zi, ii: ii}}; }});
+      sortOrder.sort(function(a, b) {{ return a.zi < b.zi ? -1 : a.zi > b.zi ? 1 : 0; }});
       traces.push({{
         type: 'scatter',
-        x: vals.map(function(_, i) {{ return i + 1; }}),
-        y: vals, name: tester, mode: 'lines+markers',
+        x: sortOrder.map(function(_, i) {{ return i + 1; }}),
+        y: sortOrder.map(function(p) {{ return vals[p.ii]; }}),
+        name: tester, mode: 'lines+markers',
         marker: {{color: colour, size: 5}},
         line: {{color: colour}},
-        text: htexts, customdata: indices,
+        text: sortOrder.map(function(p) {{ return htexts[p.ii]; }}),
+        customdata: sortOrder.map(function(p) {{ return indices[p.ii]; }}),
         hovertemplate: '%{{text}}<extra></extra>',
       }});
     }}
@@ -1113,12 +1181,16 @@ function renderChart(divId, grouped, lowL, highL, type, srcKey) {{
     shapes.push({{type:'line', x0:0, x1:1, xref:'paper', y0:highL, y1:highL,
       line:{{color:'#27ae60', dash:'dash', width:1.5}}}});
   }}
+  var _useZipLayout = type === 'box' && !!(srcKey && _boxXMode[srcKey] === 'zip');
+  var _chartH = _isExpandRender ? 580 : (_qpZoomed ? 520 : 360);
   var layout = {{
-    height: _qpZoomed ? 520 : 360, shapes: shapes,
-    margin: {{l:60, r:140, t:20, b:50}},
+    height: _chartH, shapes: shapes,
+    margin: {{l:60, r:140, t:20, b: _useZipLayout ? 80 : 50}},
     template: 'plotly_white',
     legend: {{orientation:'v', x:1.01, y:1, xanchor:'left'}},
     hovermode: 'closest',
+    boxmode: _useZipLayout ? 'group' : undefined,
+    xaxis: _useZipLayout ? {{tickangle: -45}} : {{}},
   }};
   Plotly.newPlot(el, traces, layout, {{responsive: true, displayModeBar: false}});
   if (srcKey) {{
@@ -1301,23 +1373,23 @@ function calcStatus(lsl, measure, usl) {{
 }}
 function updateChangesCell(row) {{
   var cells = row.querySelectorAll('td');
-  var lslInp = cells[6].querySelector('.lsl-inp');
-  var uslInp = cells[8].querySelector('.usl-inp');
+  var lslInp = cells[7].querySelector('.lsl-inp');
+  var uslInp = cells[9].querySelector('.usl-inp');
   var changed = (lslInp && lslInp.value !== lslInp.dataset.orig) ||
                 (uslInp && uslInp.value !== uslInp.dataset.orig);
-  cells[9].textContent = changed ? 'Yes' : 'No';
-  cells[9].className   = changed ? 'chg-yes' : 'chg-cell';
+  cells[10].textContent = changed ? 'Yes' : 'No';
+  cells[10].className   = changed ? 'chg-yes' : 'chg-cell';
 }}
 function updateRowStatus(row) {{
   var cells = row.querySelectorAll('td');
-  var lslInp = cells[6].querySelector('.lsl-inp');
-  var uslInp = cells[8].querySelector('.usl-inp');
+  var lslInp = cells[7].querySelector('.lsl-inp');
+  var uslInp = cells[9].querySelector('.usl-inp');
   var lsl  = lslInp ? lslInp.value : '';
-  var meas = cells[7].textContent.trim();
+  var meas = cells[8].textContent.trim();
   var usl  = uslInp ? uslInp.value : '';
   var st   = calcStatus(lsl, meas, usl);
-  cells[10].textContent = st;
-  cells[10].className  = st === 'Pass' ? 'st-pass' : (st === 'Fail' ? 'st-fail' : 'st-cell');
+  cells[11].textContent = st;
+  cells[11].className  = st === 'Pass' ? 'st-pass' : (st === 'Fail' ? 'st-fail' : 'st-cell');
 }}
 function onLimitChange(inp, type) {{
   var param = inp.dataset.param;
@@ -1337,7 +1409,7 @@ function onLimitChange(inp, type) {{
   }});
 }}
 function filterTable() {{
-  var NUMERIC_COLS = {{6: true, 7: true, 8: true}};
+  var NUMERIC_COLS = {{7: true, 8: true, 9: true}};
   var filters = [];
   document.querySelectorAll('.col-filter').forEach(function(inp) {{
     var col = parseInt(inp.dataset.col, 10);
@@ -1363,6 +1435,10 @@ function filterTable() {{
       return f.conds ? applyNumericFilter(f.conds, text) : f.re.test(text);
     }});
     row.style.display = show ? '' : 'none';
+  }});
+  var _n = 0;
+  document.querySelectorAll('#tbl tbody tr').forEach(function(row) {{
+    if (row.style.display !== 'none') row.querySelectorAll('td')[0].textContent = ++_n;
   }});
 }}
 // Initialise Changes and Status columns on page load
@@ -1399,7 +1475,7 @@ function applyNumericFilter(conds, text) {{
 function filterQpTable() {{
   var tbl = document.getElementById('qp-data-table');
   if (!tbl) return;
-  var NUMERIC_COLS = {{4: true, 5: true}};
+  var NUMERIC_COLS = {{5: true, 6: true}};
   var filters = [];
   tbl.querySelectorAll('.qp-col-filter').forEach(function(inp) {{
     var col = parseInt(inp.dataset.col, 10);
@@ -1419,6 +1495,10 @@ function filterQpTable() {{
       return f.conds ? applyNumericFilter(f.conds, text) : f.re.test(text);
     }});
     row.style.display = show ? '' : 'none';
+  }});
+  var _n = 0;
+  tbl.querySelectorAll('tbody tr').forEach(function(row) {{
+    if (row.style.display !== 'none') row.querySelectorAll('td')[0].textContent = ++_n;
   }});
 }}
 
@@ -1461,15 +1541,17 @@ function renderTable(param, d) {{
          + '" placeholder="' + ph + '" oninput="filterQpTable()">';
   }}
   var html = '<table id="qp-data-table"><thead><tr>'
-    + '<th><div>Source</div>'     + fi(0,'filter...') + '</th>'
-    + '<th><div>ZipFile</div>'    + fi(1,'filter...') + '</th>'
-    + '<th><div>PID</div>'        + fi(2,'filter...') + '</th>'
-    + '<th><div>TesterName</div>' + fi(3,'filter...') + '</th>'
-    + '<th><div>ArmNo</div>'      + fi(4,'>3 or >=2 <=5') + '</th>'
-    + '<th><div>Value</div>'      + fi(5,'>0.5 <=1.2') + '</th>'
+    + '<th style="text-align:center">#</th>'
+    + '<th><div>Source</div>'     + fi(1,'filter...') + '</th>'
+    + '<th><div>ZipFile</div>'    + fi(2,'filter...') + '</th>'
+    + '<th><div>PID</div>'        + fi(3,'filter...') + '</th>'
+    + '<th><div>TesterName</div>' + fi(4,'filter...') + '</th>'
+    + '<th><div>ArmNo</div>'      + fi(5,'>3 or >=2 <=5') + '</th>'
+    + '<th><div>Value</div>'      + fi(6,'>0.5 <=1.2') + '</th>'
     + '</tr></thead><tbody>';
-  rows.forEach(function(r) {{
+  rows.forEach(function(r, ri) {{
     html += '<tr>'
+          + '<td style="text-align:center;color:#888">' + (ri + 1) + '</td>'
           + '<td>' + esc(r.source) + '</td>'
           + '<td>' + esc(r.zip)    + '</td>'
           + '<td>' + esc(r.pid)    + '</td>'
@@ -1560,12 +1642,12 @@ function collectChangedRows(failTypeFilter) {{
   var changed = {{}};
   document.querySelectorAll('#tbl tbody tr').forEach(function(row) {{
     var cells = row.querySelectorAll('td');
-    if (cells[9].textContent.trim() !== 'Yes') return;
-    var ftype = cells[4].textContent.trim();
+    if (cells[10].textContent.trim() !== 'Yes') return;
+    var ftype = cells[5].textContent.trim();
     if (ftype !== failTypeFilter) return;
-    var param  = cells[5].textContent.trim();
-    var lslInp = cells[6].querySelector('.lsl-inp');
-    var uslInp = cells[8].querySelector('.usl-inp');
+    var param  = cells[6].textContent.trim();
+    var lslInp = cells[7].querySelector('.lsl-inp');
+    var uslInp = cells[9].querySelector('.usl-inp');
     var lsl = lslInp ? lslInp.value.trim() : '';
     var usl = uslInp ? uslInp.value.trim() : '';
     if (param && !changed[param]) changed[param] = {{lsl: lsl, usl: usl}};
