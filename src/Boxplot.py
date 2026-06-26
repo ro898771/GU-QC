@@ -544,12 +544,22 @@ def _build_box_plot(
             point_ids = pd.Series([str(i + 1) for i in range(len(td))])
             id_label  = "Index"
 
+        _zip_idxs = (
+            td["ZipFile"].apply(lambda z: z.rsplit('.', 1)[0].rsplit('_', 1)[-1]).tolist()
+            if "ZipFile" in td.columns else [""] * len(td)
+        )
+        if id_label == "ZipFile":
+            id_label  = "ZipIdx"
+            point_ids = _zip_idxs
+            _zip_idxs = [""] * len(td)
+
         hover_texts = [
             f"<b>Tester:</b> {tester}<br>"
             f"<b>{id_label}:</b> {pid}<br>"
-            f"<b>ArmNo:</b> {arm}<br>"
+            + (f"<b>ZipIdx:</b> {zi}<br>" if zi else "")
+            + f"<b>ArmNo:</b> {arm}<br>"
             f"<b>Value:</b> {val:.6g}"
-            for pid, arm, val in zip(point_ids, td["M_Handler-ArmNo"], td[col])
+            for pid, arm, val, zi in zip(point_ids, td["M_Handler-ArmNo"], td[col], _zip_idxs)
         ]
 
         fig.add_trace(go.Box(
@@ -713,11 +723,16 @@ def _build_box_html_with_anchors(
                 point_ids = pd.Series([str(i + 1) for i in range(len(td))])
                 id_label  = "Index"
 
+            _zip_idxs = (
+                td["ZipFile"].apply(lambda z: z.rsplit('.', 1)[0].rsplit('_', 1)[-1]).tolist()
+                if "ZipFile" in td.columns else [""] * len(td)
+            )
             hover_texts = [
                 f"<b>PID:</b> {pid}<br>"
-                f"<b>ArmNo:</b> {arm}<br>"
+                + (f"<b>ZipIdx:</b> {zi}<br>" if zi else "")
+                + f"<b>ArmNo:</b> {arm}<br>"
                 f"<b>Value:</b> {val:.6g}"
-                for pid, arm, val in zip(point_ids, td["M_Handler-ArmNo"], td[col])
+                for pid, arm, val, zi in zip(point_ids, td["M_Handler-ArmNo"], td[col], _zip_idxs)
             ]
             fig.add_trace(go.Box(
                 y=td[col].tolist(), name=tester,
@@ -941,11 +956,21 @@ def _build_box_page(
                 point_ids = pd.Series([str(i + 1) for i in range(len(td))])
                 id_label  = "Index"
 
+            _zip_idxs = (
+                td["ZipFile"].apply(lambda z: z.rsplit('.', 1)[0].rsplit('_', 1)[-1]).tolist()
+                if "ZipFile" in td.columns else [""] * len(td)
+            )
+            if id_label == "ZipFile":
+                id_label  = "ZipIdx"
+                point_ids = _zip_idxs
+                _zip_idxs = [""] * len(td)
+
             hover_texts = [
-                f"<b>PID:</b> {pid}<br>"
-                f"<b>ArmNo:</b> {arm}<br>"
+                f"<b>{id_label}:</b> {pid}<br>"
+                + (f"<b>ZipIdx:</b> {zi}<br>" if zi else "")
+                + f"<b>ArmNo:</b> {arm}<br>"
                 f"<b>Value:</b> {val:.6g}"
-                for pid, arm, val in zip(point_ids, td["M_Handler-ArmNo"], td[col])
+                for pid, arm, val, zi in zip(point_ids, td["M_Handler-ArmNo"], td[col], _zip_idxs)
             ]
 
             fig.add_trace(

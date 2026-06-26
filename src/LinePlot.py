@@ -224,7 +224,7 @@ def build_figure(param_specs: pd.DataFrame,
             hover = [
                 (
                     f"<b>Tester:</b> {tester}<br>"
-                    f"<b>ZipFile:</b> {zf}<br>"
+                    f"<b>ZipIdx:</b> {zf.rsplit('.', 1)[0].rsplit('_', 1)[-1]}<br>"
                     f"<b>Device:</b> {dev}<br>"
                     f"<b>ArmNo:</b> {arm}<br>"
                     f"<b>Value:</b> {val:.6g}"
@@ -379,11 +379,12 @@ def _build_html_with_anchors(
             hover  = [
                 (
                     f"<b>PID:</b> {dev}<br>"
+                    f"<b>ZipIdx:</b> {zf.rsplit('.', 1)[0].rsplit('_', 1)[-1]}<br>"
                     f"<b>ArmNo:</b> {arm}<br>"
                     f"<b>Value:</b> {val:.6g}"
                 )
-                for dev, arm, val in zip(
-                    td["Device"], td["M_Handler-ArmNo"], td[col]
+                for dev, arm, val, zf in zip(
+                    td["Device"], td["M_Handler-ArmNo"], td[col], td["ZipFile"]
                 )
             ]
             fig.add_trace(go.Scatter(

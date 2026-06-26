@@ -1063,10 +1063,14 @@ function renderChart(divId, grouped, lowL, highL, type, srcKey) {{
     var pids   = d.p ? indices.map(function(i) {{ return d.p[i]; }}) : null;
     var arms   = d.a ? indices.map(function(i) {{ return d.a[i]; }}) : null;
     var colour = PALETTE[ci % PALETTE.length];
+    var zips   = d.z ? indices.map(function(i) {{ return d.z[i]; }}) : null;
     var htexts = vals.map(function(v, ii) {{
-      return '<b>PID:</b> '   + (pids ? pids[ii] : indices[ii] + 1) + '<br>'
-           + '<b>ArmNo:</b> ' + (arms ? arms[ii] : 'N/A') + '<br>'
-           + '<b>Value:</b> ' + v;
+      var zf  = zips ? zips[ii] : '';
+      var idx = zf ? zf.replace(/\.[^.]+$/, '').split('_').pop() : '';
+      return '<b>PID:</b> '    + (pids ? pids[ii] : indices[ii] + 1) + '<br>'
+           + (idx ? '<b>ZipIdx:</b> ' + idx + '<br>' : '')
+           + '<b>ArmNo:</b> '  + (arms ? arms[ii] : 'N/A') + '<br>'
+           + '<b>Value:</b> '  + v;
     }});
     if (type === 'box') {{
       traces.push({{
