@@ -3,6 +3,8 @@ import os
 import re
 import csv
 
+from lib.event.winpath import long_path
+
 SOURCE_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULT_DIR = os.path.join(SOURCE_DIR, "result")
 OUTPUT_CSV = os.path.join(RESULT_DIR, "GuLog_FailedSummary.csv")
@@ -36,13 +38,13 @@ HEADER_KEYS = [
     "TesterName", "TesterIPaddress", "Operator",
 ]
 
-zip_files = sorted(f for f in os.listdir(SOURCE_DIR) if f.lower().endswith(".zip"))
+zip_files = sorted(f for f in os.listdir(long_path(SOURCE_DIR)) if f.lower().endswith(".zip"))
 
 rows = []
 
 for zip_name in zip_files:
     zip_path = os.path.join(SOURCE_DIR, zip_name)
-    with zipfile.ZipFile(zip_path, "r") as zf:
+    with zipfile.ZipFile(long_path(zip_path), "r") as zf:
         log_entries = [e for e in zf.namelist() if "GuLogPrintout" in e]
         if not log_entries:
             print(f"  [SKIP] No GuLogPrintout in: {zip_name}")
@@ -102,7 +104,7 @@ for zip_name in zip_files:
 # --- write CSV ---
 if rows:
     fieldnames = list(rows[0].keys())
-    with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as f:
+    with open(long_path(OUTPUT_CSV), "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)

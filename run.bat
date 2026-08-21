@@ -4,7 +4,7 @@ setlocal
 :: ============================================================
 :: run.bat
 ::
-:: Option 1 — Full run: extract ZIP files, build CONCAT CSVs,
+:: Option 1 — Full run: extract ZIP/GUCAL files, build CONCAT CSVs,
 ::             then generate Plotly HTML charts.
 ::
 :: Option 2 — Plot only: skip extraction, use the existing
@@ -14,7 +14,9 @@ setlocal
 
 set "SCRIPT_DIR=%~dp0"
 set "SCRIPT=%SCRIPT_DIR%src\main.py"
-set "PLOT_SCRIPT=%SCRIPT_DIR%src\plot.py"
+set "PLOT_SCRIPT=%SCRIPT_DIR%src\lib\event\plot.py"
+set "RECORD_MODE_SCRIPT=%SCRIPT_DIR%src\lib\event\record_mode.py"
+set "STARTUP_HEALTH_SCRIPT=%SCRIPT_DIR%src\lib\event\startup_health.py"
 set "RESULT_DIR=%SCRIPT_DIR%result"
 set "ENV_PYTHON=%SCRIPT_DIR%.venv\Scripts\python.exe"
 
@@ -29,9 +31,10 @@ echo ============================================================
 echo  GU-QC File Processor
 echo  Python : %PY%
 echo ============================================================
+"%PY%" "%STARTUP_HEALTH_SCRIPT%"
 echo.
 echo Select mode:
-echo   1) Process ZIP files  ^(extract + concat, then generate plots^)
+echo   1) Process ZIP/GUCAL files  ^(extract + concat, then generate plots^)
 echo   2) Use existing result files  ^(skip extraction, regenerate plots only^)
 echo.
 set /p "MODE=Enter choice [1/2]: "
@@ -48,7 +51,8 @@ goto :eof
 
 :: ─────────────────────────────────────────────────────────────
 :option1
-echo [Option 1] Extracting ZIP files and building CONCAT CSVs...
+"%PY%" "%RECORD_MODE_SCRIPT%" 1
+echo [Option 1] Extracting ZIP/GUCAL files and building CONCAT CSVs...
 echo ============================================================
 echo.
 "%PY%" "%SCRIPT%"
@@ -66,6 +70,7 @@ goto generate_plots
 
 :: ─────────────────────────────────────────────────────────────
 :option2
+"%PY%" "%RECORD_MODE_SCRIPT%" 2
 if not exist "%RESULT_DIR%\" (
     echo [ERROR] No result\ folder found.
     echo         Run Option 1 first to generate the CONCAT files.

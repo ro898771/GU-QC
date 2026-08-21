@@ -1,6 +1,8 @@
 import csv
 import os
 
+from lib.event.winpath import long_path
+
 SOURCE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "result", "GuVrfyError_ALL_CONCAT.csv")
 OUTPUT  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "result", "GuVrfyError_TargetParams.csv")
 
@@ -18,7 +20,7 @@ TARGET_FRAGMENTS = [
 # Number of leading identity columns to always keep
 ID_COL_COUNT = 10   # Parameter, SBIN, HBIN, DIE_X, DIE_Y, SITE, TIME, TOTAL_TESTS, LOT_ID, WAFER_ID
 
-with open(SOURCE, encoding="utf-8") as f:
+with open(long_path(SOURCE), encoding="utf-8") as f:
     reader = csv.reader(f)
     all_rows = list(reader)
 
@@ -47,7 +49,7 @@ for row in all_rows:
     padded = row + [""] * (max(keep_cols) + 1 - len(row))
     out_rows.append([padded[c] for c in keep_cols])
 
-with open(OUTPUT, "w", newline="", encoding="utf-8") as f:
+with open(long_path(OUTPUT), "w", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
     writer.writerows(out_rows)
 

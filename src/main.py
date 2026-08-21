@@ -21,6 +21,7 @@ Tasks:
 
 from __future__ import annotations
 
+import sys
 import zipfile
 import os
 import re
@@ -28,22 +29,42 @@ import csv
 import shutil
 import stat
 
+from lib.event.gu_summary import parse_wide_gu_text, build_gu_summary_rows, write_gu_summary_csv
+from lib.event.winpath import long_path
+from lib.event import telemetry
+
+
+def _report_uncaught(exc_type, exc_value, exc_tb):
+    """sys.excepthook: report any uncaught failure to the Telemetry API
+    before falling back to the normal traceback/exit behavior.
+
+    Note: the interpreter special-cases SystemExit and never actually
+    invokes sys.excepthook for it, so `raise SystemExit(...)` sites (e.g.
+    "No ZIP files found" below) must call telemetry.log_feature_error
+    directly rather than relying on this hook."""
+    if exc_type is not KeyboardInterrupt:
+        telemetry.log_feature_error("ProcessZip", f"{exc_type.__name__}: {exc_value}")
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+
+sys.excepthook = _report_uncaught
+
 
 def _force_remove_readonly(func, path, _exc_info):
     """onerror handler for shutil.rmtree: make file writable then retry."""
-    os.chmod(path, stat.S_IWRITE)
-    func(path)
+    os.chmod(long_path(path), stat.S_IWRITE)
+    func(long_path(path))
 
 
 def _force_delete(path: str) -> None:
     """Delete a single file, forcing writable if needed. No-op if not found."""
-    if not os.path.exists(path):
+    if not os.path.exists(long_path(path)):
         return
     try:
-        os.remove(path)
+        os.remove(long_path(path))
     except PermissionError:
-        os.chmod(path, stat.S_IWRITE)
-        os.remove(path)
+        os.chmod(long_path(path), stat.S_IWRITE)
+        os.remove(long_path(path))
 
 # ── paths ──────────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -59,9 +80,9 @@ folder_name = os.path.basename(GUFILE_DIR)
 OUT_DIR     = os.path.join(os.getcwd(), "result")
 
 # Force-clean the result folder before each run to avoid stale file conflicts
-if os.path.exists(OUT_DIR):
+if os.path.exists(long_path(OUT_DIR)):
     print(f"Cleaning previous result folder: {OUT_DIR}")
-    shutil.rmtree(OUT_DIR, onerror=_force_remove_readonly)
+    shutil.rmtree(long_path(OUT_DIR), onerror=_force_remove_readonly)
 
 # sub-folders for individual extracted files
 DIR_CF  = os.path.join(OUT_DIR, "GuCorrFactor")
@@ -71,9 +92,10 @@ DIR_VR  = os.path.join(OUT_DIR, "Vry_GuRawData")
 DIR_RF  = os.path.join(OUT_DIR, "GuRefFinalData")
 DIR_VD  = os.path.join(OUT_DIR, "GuVrfyData")
 DIR_CC  = os.path.join(OUT_DIR, "GuCorrCoeff")
+DIR_GS  = os.path.join(OUT_DIR, "1GuSummary")
 
-for d in (OUT_DIR, DIR_CF, DIR_VE, DIR_CR, DIR_VR, DIR_RF, DIR_VD, DIR_CC):
-    os.makedirs(d, exist_ok=True)
+for d in (OUT_DIR, DIR_CF, DIR_VE, DIR_CR, DIR_VR, DIR_RF, DIR_VD, DIR_CC, DIR_GS):
+    os.makedirs(long_path(d), exist_ok=True)
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 HEADER_META_KEYS = [
@@ -122,7 +144,7 @@ def extract_and_save(zf: zipfile.ZipFile, entry: str, dest_dir: str) -> str:
     """Extract a single zip entry flat into dest_dir. Returns dest path."""
     filename = os.path.basename(entry)
     dest = os.path.join(dest_dir, filename)
-    with zf.open(entry) as src, open(dest, "wb") as dst:
+    with zf.open(entry) as src, open(long_path(dest), "wb") as dst:
         shutil.copyfileobj(src, dst)
     return dest
 
@@ -140,7 +162,7 @@ def build_zip_tester_map(extracted_list: list[tuple[str, str]]) -> dict[str, str
     mapping: dict[str, str] = {}
     for path, zip_name in extracted_list:
         try:
-            with open(path, encoding="utf-8", errors="replace") as f:
+            with open(long_path(path), encoding="utf-8", errors="replace") as f:
                 for line in f:
                     if line.startswith("TesterName,"):
                         tester = line[len("TesterName,"):].strip()
@@ -177,7 +199,7 @@ def concat_csv_files(file_list: list[tuple[str, str]], output_path: str,
     data_rows: list[str] = []
 
     for path, zip_name in file_list:
-        with open(path, encoding="utf-8", errors="replace") as f:
+        with open(long_path(path), encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
 
         tester_name = get_tester_name(lines)
@@ -208,7 +230,7 @@ def concat_csv_files(file_list: list[tuple[str, str]], output_path: str,
 
         col_header_written = True
 
-    with open(output_path, "w", encoding="utf-8", newline="") as out:
+    with open(long_path(output_path), "w", encoding="utf-8", newline="") as out:
         out.writelines(col_header_rows)
         out.writelines(data_rows)
 
@@ -224,7 +246,7 @@ def build_cr_pid_map(extracted_cr: list[tuple[str, str]]) -> dict[str, str]:
     for path, zip_name in extracted_cr:
         pids: set[str] = set()
         try:
-            with open(path, encoding="utf-8", errors="replace") as f:
+            with open(long_path(path), encoding="utf-8", errors="replace") as f:
                 for line in f:
                     first = line.split(",")[0].strip()
                     if first.startswith("PID-"):
@@ -271,20 +293,20 @@ DEVICE_RE = re.compile(r"GU Device #(\d+) being run")
 
 # ── rename .gucal → .zip before discovery ─────────────────────────────────────
 _gucal_renamed = []
-for _fname in os.listdir(GUFILE_DIR):
+for _fname in os.listdir(long_path(GUFILE_DIR)):
     if _fname.lower().endswith(".gucal"):
         _src = os.path.join(GUFILE_DIR, _fname)
         _dst = os.path.join(GUFILE_DIR, _fname[:-6] + ".zip")
-        os.rename(_src, _dst)
+        os.rename(long_path(_src), long_path(_dst))
         _gucal_renamed.append(_fname)
-for _sub in os.listdir(GUFILE_DIR):
+for _sub in os.listdir(long_path(GUFILE_DIR)):
     _sub_path = os.path.join(GUFILE_DIR, _sub)
-    if os.path.isdir(_sub_path):
-        for _fname in os.listdir(_sub_path):
+    if os.path.isdir(long_path(_sub_path)):
+        for _fname in os.listdir(long_path(_sub_path)):
             if _fname.lower().endswith(".gucal"):
                 _src = os.path.join(_sub_path, _fname)
                 _dst = os.path.join(_sub_path, _fname[:-6] + ".zip")
-                os.rename(_src, _dst)
+                os.rename(long_path(_src), long_path(_dst))
                 _gucal_renamed.append(os.path.join(_sub, _fname))
 if _gucal_renamed:
     print(f"Renamed {len(_gucal_renamed)} .gucal file(s) to .zip:")
@@ -293,18 +315,19 @@ if _gucal_renamed:
     print()
 
 # ── main processing ────────────────────────────────────────────────────────────
-_top_zips = [f for f in os.listdir(GUFILE_DIR) if f.lower().endswith(".zip")]
+_top_zips = [f for f in os.listdir(long_path(GUFILE_DIR)) if f.lower().endswith(".zip")]
 _sub_zips = [
     os.path.join(sub, f)
-    for sub in os.listdir(GUFILE_DIR)
-    if os.path.isdir(os.path.join(GUFILE_DIR, sub))
-    for f in os.listdir(os.path.join(GUFILE_DIR, sub))
+    for sub in os.listdir(long_path(GUFILE_DIR))
+    if os.path.isdir(long_path(os.path.join(GUFILE_DIR, sub)))
+    for f in os.listdir(long_path(os.path.join(GUFILE_DIR, sub)))
     if f.lower().endswith(".zip")
 ]
 zip_files = sorted(_top_zips + _sub_zips)
 
 if not zip_files:
     print("No ZIP files found in:", GUFILE_DIR)
+    telemetry.log_feature_error("ProcessZip", f"No ZIP files found in: {GUFILE_DIR}")
     raise SystemExit(1)
 
 print(f"Found {len(zip_files)} ZIP file(s) in {folder_name}\n")
@@ -319,11 +342,15 @@ extracted_vd  = []   # list of (path, zip_name) for extracted GuVrfyData files
 extracted_cc  = []   # list of (path, zip_name) for extracted GuCorrCoeff files
 failure_rows  = []   # dicts for the summary table
 
+pid_group_to_batch: dict[frozenset, int] = {}   # unique PID-group -> sequential GuBatchID
+gu_summary_count = 0
+
 for zip_name in zip_files:
     zip_path = os.path.join(GUFILE_DIR, zip_name)
     print(f"\n[ZIP] {zip_name}")
+    gs_dest: dict[str, str] = {}   # block name -> extracted file path, for this zip's GuSummary
 
-    with zipfile.ZipFile(zip_path, "r") as zf:
+    with zipfile.ZipFile(long_path(zip_path), "r") as zf:
         entries = zf.namelist()
 
         # ── a) GuCorrFactor ───────────────────────────────────────────────────
@@ -331,6 +358,7 @@ for zip_name in zip_files:
         if entry_cf and "NoDemoOffset" not in entry_cf:
             dest = extract_and_save(zf, entry_cf, DIR_CF)
             extracted_cf.append((dest, zip_name))
+            gs_dest["GuCorrFactor"] = dest
             print(f"  [CF ] {os.path.basename(entry_cf)}")
         else:
             # try again without subfolder restriction in case naming differs
@@ -338,6 +366,7 @@ for zip_name in zip_files:
             if fallback:
                 dest = extract_and_save(zf, fallback[0], DIR_CF)
                 extracted_cf.append((dest, zip_name))
+                gs_dest["GuCorrFactor"] = dest
                 print(f"  [CF ] {os.path.basename(fallback[0])}")
             else:
                 print(f"  [CF ] SKIP — not found")
@@ -347,6 +376,7 @@ for zip_name in zip_files:
         if entry_ve:
             dest = extract_and_save(zf, entry_ve, DIR_VE)
             extracted_ve.append((dest, zip_name))
+            gs_dest["GuVrfyError"] = dest
             print(f"  [VE ] {os.path.basename(entry_ve)}")
         else:
             print(f"  [VE ] SKIP — not found")
@@ -356,6 +386,7 @@ for zip_name in zip_files:
         if entry_cr:
             dest = extract_and_save(zf, entry_cr, DIR_CR)
             extracted_cr.append((dest, zip_name))
+            gs_dest["GuCorrRawData"] = dest
             print(f"  [CR ] {os.path.basename(entry_cr)}")
         else:
             print(f"  [CR ] SKIP — not found")
@@ -365,6 +396,7 @@ for zip_name in zip_files:
         if entry_vr:
             dest = extract_and_save(zf, entry_vr, DIR_VR)
             extracted_vr.append((dest, zip_name))
+            gs_dest["GuRawData"] = dest
             print(f"  [VR ] {os.path.basename(entry_vr)}")
         else:
             print(f"  [VR ] SKIP — not found")
@@ -374,6 +406,7 @@ for zip_name in zip_files:
         if entry_rf:
             dest = extract_and_save(zf, entry_rf, DIR_RF)
             extracted_rf.append((dest, zip_name))
+            gs_dest["GuRefFinalData"] = dest
             print(f"  [RF ] {os.path.basename(entry_rf)}")
         else:
             print(f"  [RF ] SKIP — not found")
@@ -392,6 +425,7 @@ for zip_name in zip_files:
         if entry_cc and "LooseDemo" not in entry_cc:
             dest = extract_and_save(zf, entry_cc, DIR_CC)
             extracted_cc.append((dest, zip_name))
+            gs_dest["GuCorrCoeff"] = dest
             print(f"  [CC ] {os.path.basename(entry_cc)}")
         else:
             fallback_cc = [e for e in entries if "GuCorrCoeff" in e and "LooseDemo" not in e
@@ -399,6 +433,7 @@ for zip_name in zip_files:
             if fallback_cc:
                 dest = extract_and_save(zf, fallback_cc[0], DIR_CC)
                 extracted_cc.append((dest, zip_name))
+                gs_dest["GuCorrCoeff"] = dest
                 print(f"  [CC ] {os.path.basename(fallback_cc[0])}")
             else:
                 print(f"  [CC ] SKIP — not found")
@@ -458,6 +493,31 @@ for zip_name in zip_files:
             print(f"  [LOG] TesterName={meta['TesterName']}  |  Failed lines={fail_count}")
         else:
             print(f"  [LOG] SKIP — GuLogPrintout not found")
+
+    # ── n) GuSummary — transpose + merge the 6 blocks side by side ────────────
+    if gs_dest:
+        zip_stem = zip_name[:-4] if zip_name.lower().endswith(".zip") else zip_name
+        zip_stem = os.path.basename(zip_stem)
+        parsed = {}
+        for block, path in gs_dest.items():
+            with open(long_path(path), encoding="utf-8", errors="replace") as f:
+                parsed[block] = parse_wide_gu_text(f.read())
+        pid_group = frozenset(
+            p for block in ("GuRefFinalData", "GuCorrRawData", "GuRawData", "GuVrfyError")
+            if block in parsed
+            for p in parsed[block][2]
+            if p.startswith("PID-")
+        )
+        if pid_group not in pid_group_to_batch:
+            pid_group_to_batch[pid_group] = len(pid_group_to_batch) + 1
+        gu_batch_id = pid_group_to_batch[pid_group]
+
+        gs_rows = build_gu_summary_rows(parsed, zip_stem, gu_batch_id)
+        if gs_rows:
+            out_gs = os.path.join(DIR_GS, f"{zip_stem}_Summary.csv")
+            write_gu_summary_csv(gs_rows, out_gs)
+            gu_summary_count += 1
+            print(f"  [GS ] GuBatchID={gu_batch_id}  ->  {os.path.basename(out_gs)}")
 
 # ── b) Concat GuCorrFactor ─────────────────────────────────────────────────────
 print("\n" + "=" * 70)
@@ -527,7 +587,7 @@ fieldnames = [
     "Product", "Sublot", "ZipFile", "FailType",
     "Site", "Device", "TestNum", "ParamName", "LowL", "MeasureError", "HighL",
 ]
-with open(out_log, "w", newline="", encoding="utf-8") as f:
+with open(long_path(out_log), "w", newline="", encoding="utf-8") as f:
     if failure_rows:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -546,6 +606,7 @@ print(f"  GuRawData       : {len(extracted_vr)} files extracted,  concat written
 print(f"  GuRefFinalData  : {len(extracted_rf)} files extracted,  concat written")
 print(f"  GuVrfyData      : {len(extracted_vd)} files extracted,  concat written")
 print(f"  GuCorrCoeff     : {len(extracted_cc)} files extracted,  concat written")
+print(f"  GuSummary       : {gu_summary_count} per-zip summary file(s) written")
 print(f"  Failure rows    : {len(failure_rows)}")
 print(f"  Output folder : {OUT_DIR}")
 

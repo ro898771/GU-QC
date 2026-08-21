@@ -1,4 +1,13 @@
 import os
+import sys
+
+# Allow running this script directly (py .../concat_GuVrfyError.py) -- put
+# <project_root>/src on sys.path so the lib.event.* absolute imports resolve.
+_SRC_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+
+from lib.event.winpath import long_path
 
 SOURCE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "result")
 OUTPUT_FILE = os.path.join(SOURCE_DIR, "GuVrfyError_ALL_CONCAT.csv")
@@ -6,7 +15,7 @@ OUTPUT_FILE = os.path.join(SOURCE_DIR, "GuVrfyError_ALL_CONCAT.csv")
 HEADER_STARTS = {"Parameter,", "Test#,", "Unit,", "HighL,", "LowL,"}
 
 csv_files = sorted(
-    f for f in os.listdir(SOURCE_DIR)
+    f for f in os.listdir(long_path(SOURCE_DIR))
     if "GuVrfyError" in f and f.endswith(".csv") and "CONCAT" not in f
 )
 
@@ -21,7 +30,7 @@ data_rows   = []   # PID-... rows from all files
 
 for idx, fname in enumerate(csv_files):
     fpath = os.path.join(SOURCE_DIR, fname)
-    with open(fpath, encoding="utf-8", errors="replace") as fh:
+    with open(long_path(fpath), encoding="utf-8", errors="replace") as fh:
         lines = fh.readlines()
 
     file_data = []
@@ -38,7 +47,7 @@ for idx, fname in enumerate(csv_files):
     print(f"  {fname}  ->  {len(file_data)} data row(s)")
     data_rows.extend(file_data)
 
-with open(OUTPUT_FILE, "w", encoding="utf-8", newline="") as out:
+with open(long_path(OUTPUT_FILE), "w", encoding="utf-8", newline="") as out:
     out.writelines(header_rows)
     out.writelines(data_rows)
 

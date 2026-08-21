@@ -5,21 +5,46 @@ CLI entry point for plot generation.
 Run this script after main.py has produced the result/ folder.
 
 Usage:
-  py src/plot.py
+  py src/lib/event/plot.py
 """
 
 import os
 import sys
 
+# Allow running this script directly (py .../plot.py) -- put <project_root>/src
+# on sys.path so the lib.event.* absolute imports below resolve.
+_SRC_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+
+from lib.event.winpath import long_path
+from lib.event import telemetry
+
+
+def _report_uncaught(exc_type, exc_value, exc_tb):
+    """sys.excepthook: report any uncaught failure to the Telemetry API
+    before falling back to the normal traceback/exit behavior.
+
+    Note: the interpreter special-cases SystemExit and never actually
+    invokes sys.excepthook for it, so `sys.exit(...)` sites (e.g. "Invalid
+    choice" below) must call telemetry.log_feature_error directly rather
+    than relying on this hook."""
+    if exc_type is not KeyboardInterrupt:
+        telemetry.log_feature_error("GeneratePlots", f"{exc_type.__name__}: {exc_value}")
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+
+sys.excepthook = _report_uncaught
+
 
 def _run_lineplot():
-    from LinePlot import main
+    from lib.event.LinePlot import main
     main()
     generate_summary_html("LinePlot")
 
 
 def _run_boxplot():
-    from Boxplot import main
+    from lib.event.Boxplot import main
     main()
     generate_summary_html("BoxPlot")
 
@@ -41,7 +66,8 @@ def generate_summary_html(plot_type: str) -> None:
     import re
     import pandas as pd
 
-    BASE_DIR    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # This file lives at <project_root>/src/lib/event/plot.py -- up 4 levels to root.
+    BASE_DIR    = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     RESULT_DIR  = os.path.join(BASE_DIR, "result")
     SUMMARY_CSV = os.path.join(RESULT_DIR, "GuLog_FailedSummary.csv")
     PLOT_DIR    = os.path.join(RESULT_DIR, "Plot")
@@ -56,17 +82,17 @@ def generate_summary_html(plot_type: str) -> None:
     VD_CSV = os.path.join(RESULT_DIR, "GuVrfyData_ALL_CONCAT.csv")
     CC_CSV = os.path.join(RESULT_DIR, "GuCorrCoeff_ALL_CONCAT.csv")
 
-    if not os.path.exists(SUMMARY_CSV):
+    if not os.path.exists(long_path(SUMMARY_CSV)):
         print("  [INFO] GuLog_FailedSummary.csv not found — generating page with QuickPlot only.")
         df = pd.DataFrame()
     else:
-        with open(SUMMARY_CSV, encoding="utf-8") as f:
+        with open(long_path(SUMMARY_CSV), encoding="utf-8") as f:
             _first_line = f.readline().strip()
         if _first_line.startswith("All Pass"):
             print("  All Pass — generating Summary page with QuickPlot only.")
             df = pd.DataFrame()
         else:
-            df = pd.read_csv(SUMMARY_CSV)
+            df = pd.read_csv(long_path(SUMMARY_CSV))
 
     if not df.empty:
         # Unique (ParamName, FailType) in first-seen order
@@ -93,9 +119,9 @@ def generate_summary_html(plot_type: str) -> None:
     # ── Quick-plot: load concat CSVs and extract per-param data ─────────────
     def _load_csv(path):
         """Load concat CSV (header=row[0], data=rows[5+])."""
-        if not os.path.exists(path):
+        if not os.path.exists(long_path(path)):
             return pd.DataFrame()
-        with open(path, encoding="utf-8", errors="replace") as fh:
+        with open(long_path(path), encoding="utf-8", errors="replace") as fh:
             rows = list(csv_mod.reader(fh))
         if len(rows) < 6:
             return pd.DataFrame()
@@ -124,9 +150,9 @@ def generate_summary_html(plot_type: str) -> None:
         """Read HighL (row 3) and LowL (row 4) from a concat CSV.
         Returns {col_name: (lowL, highL)} with float or None values.
         Sentinel values (|limit| >= 1e5, e.g. 999999 / 9999999) are treated as None."""
-        if not os.path.exists(path):
+        if not os.path.exists(long_path(path)):
             return {}
-        with open(path, encoding="utf-8", errors="replace") as fh:
+        with open(long_path(path), encoding="utf-8", errors="replace") as fh:
             rows = list(csv_mod.reader(fh))
         if len(rows) < 5:
             return {}
@@ -368,7 +394,7 @@ def generate_summary_html(plot_type: str) -> None:
     def _link(tag: str, page: int, label: str, param: str) -> str:
         fname  = f"FailedParams_{tag}_{plot_type}_p{page:02d}.html"
         anchor = _safe_id(param)
-        if not os.path.exists(os.path.join(PLOT_DIR, fname)):
+        if not os.path.exists(long_path(os.path.join(PLOT_DIR, fname))):
             return '<span class="na">—</span>'
         return f'<a href="{fname}#{anchor}" target="_blank">{label} p{page}</a>'
 
@@ -1123,7 +1149,7 @@ function renderChart(divId, grouped, lowL, highL, type, srcKey) {{
     var zips   = d.z ? indices.map(function(i) {{ return d.z[i]; }}) : null;
     var htexts = vals.map(function(v, ii) {{
       var zf  = zips ? zips[ii] : '';
-      var idx = zf ? zf.replace(/\.[^.]+$/, '').split('_').pop() : '';
+      var idx = zf ? zf.replace(/\\.[^.]+$/, '').split('_').pop() : '';
       return '<b>PID:</b> '    + (pids ? pids[ii] : indices[ii] + 1) + '<br>'
            + (idx ? '<b>ZipIdx:</b> ' + idx + '<br>' : '')
            + '<b>ArmNo:</b> '  + (arms ? arms[ii] : 'N/A') + '<br>'
@@ -1131,7 +1157,7 @@ function renderChart(divId, grouped, lowL, highL, type, srcKey) {{
     }});
     var zipIdxs = vals.map(function(_, ii) {{
       var zf = zips ? zips[ii] : '';
-      return zf ? zf.replace(/\.[^.]+$/, '').split('_').pop() : String(ii + 1);
+      return zf ? zf.replace(/\\.[^.]+$/, '').split('_').pop() : String(ii + 1);
     }});
     if (type === 'box') {{
       var useZipX = !!(srcKey && _boxXMode[srcKey] === 'zip');
@@ -1300,9 +1326,9 @@ function exportRemovedUnits() {{
 function globToRegex(pat) {{
   if (!pat) return null;
   if (pat.indexOf('*') === -1 && pat.indexOf('?') === -1) {{
-    return new RegExp(pat.replace(/[.+^${{}}()|[\]\\\\]/g, '\\\\$&'), 'i');
+    return new RegExp(pat.replace(/[.+^${{}}()|[\\]\\\\]/g, '\\\\$&'), 'i');
   }}
-  var esc = pat.replace(/[.+^${{}}()|[\]\\\\]/g, '\\\\$&')
+  var esc = pat.replace(/[.+^${{}}()|[\\]\\\\]/g, '\\\\$&')
                .replace(/\\*/g, '.*')
                .replace(/\\?/g, '.');
   return new RegExp('^' + esc + '$', 'i');
@@ -1448,9 +1474,9 @@ document.querySelectorAll('#tbl tbody tr').forEach(function(row) {{
 }});
 function parseNumericFilter(expr) {{
   /* Parse expressions like: >3  >=2.5  <10  <=4  >1 <=5  (space-separated AND) */
-  var parts = expr.trim().split(/\s+/);
+  var parts = expr.trim().split(/\\s+/);
   var conds = [];
-  var re = /^(>=|<=|>|<|==?)\s*(-?[\d.]+)$/;
+  var re = /^(>=|<=|>|<|==?)\\s*(-?[\\d.]+)$/;
   for (var i = 0; i < parts.length; i++) {{
     var m = parts[i].match(re);
     if (!m) return null;
@@ -1747,8 +1773,8 @@ function downloadBlob(content, filename, mimeType) {{
 </body>
 </html>"""
 
-    os.makedirs(PLOT_DIR, exist_ok=True)
-    with open(OUT_HTML, "w", encoding="utf-8") as f:
+    os.makedirs(long_path(PLOT_DIR), exist_ok=True)
+    with open(long_path(OUT_HTML), "w", encoding="utf-8") as f:
         f.write(html)
 
     print(f"\n  Summary table -> {OUT_HTML}")
@@ -1771,11 +1797,14 @@ def main():
     choice = input("Enter choice [1/2, default=Enter]: ").strip() or "2"
 
     if choice == "1":
+        telemetry.log_feature_click("SelectPlotType_1")
         _run_lineplot()
     elif choice == "2":
+        telemetry.log_feature_click("SelectPlotType_2")
         _run_boxplot()
     else:
         print("Invalid choice. Please enter 1 or 2.")
+        telemetry.log_feature_error("GeneratePlots", f"Invalid plot-type choice: {choice!r}")
         sys.exit(1)
 
 

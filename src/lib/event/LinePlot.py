@@ -28,10 +28,13 @@ import sys
 import pandas as pd
 import plotly.colors as pc
 import plotly.graph_objects as go
+
+from lib.event.winpath import long_path
 from plotly.subplots import make_subplots
 
 # ── Paths ───────────────────────────────────────────────────────────────────────
-BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# This file lives at <project_root>/src/lib/event/LinePlot.py -- up 4 levels to root.
+BASE_DIR   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 RESULT_DIR = os.path.join(BASE_DIR, "result")
 
 SUMMARY_CSV     = os.path.join(RESULT_DIR, "GuLog_FailedSummary.csv")
@@ -63,10 +66,10 @@ def load_concat_csv(path: str) -> pd.DataFrame:
       row 5+: data rows
     Returns DataFrame using row-0 as column names, rows 5+ as data.
     """
-    if not os.path.exists(path):
+    if not os.path.exists(long_path(path)):
         print(f"  [WARN] File not found: {os.path.basename(path)}")
         return pd.DataFrame()
-    with open(path, encoding="utf-8", errors="replace") as f:
+    with open(long_path(path), encoding="utf-8", errors="replace") as f:
         rows = list(csv.reader(f))
     if len(rows) < 6:
         print(f"  [WARN] Too few rows in {os.path.basename(path)}")
@@ -531,18 +534,18 @@ window.addEventListener('load', function(){{
 
 
 def main():
-    if not os.path.exists(SUMMARY_CSV):
+    if not os.path.exists(long_path(SUMMARY_CSV)):
         print(f"ERROR: {SUMMARY_CSV} not found.\nRun main.py first to generate result files.")
         sys.exit(1)
 
-    with open(SUMMARY_CSV, encoding="utf-8") as _f:
+    with open(long_path(SUMMARY_CSV), encoding="utf-8") as _f:
         _peek = _f.readline().strip()
 
     if _peek.startswith("All Pass"):
         print("GuLog_FailedSummary.csv reports All Pass -- nothing to plot.")
         sys.exit(0)
 
-    summary_df = pd.read_csv(SUMMARY_CSV)
+    summary_df = pd.read_csv(long_path(SUMMARY_CSV))
 
     # One spec entry per unique (ParamName, FailType) -- first LowL / HighL wins
     param_specs = (
@@ -574,7 +577,7 @@ def main():
     zip_device_map = build_zip_device_map(cr_df)
     print(f"  ZipFile->Device map : {len(zip_device_map)} session(s)\n")
 
-    os.makedirs(PLOT_DIR, exist_ok=True)
+    os.makedirs(long_path(PLOT_DIR), exist_ok=True)
     outputs_opened = []
 
     def _save_pages(specs, src_cf, src_ve, is_corr, tag, title_prefix, show_spec=True):
@@ -596,7 +599,7 @@ def main():
             if html is not None:
                 fname = f"FailedParams_{tag}_LinePlot_p{page_i:02d}.html"
                 out   = os.path.join(PLOT_DIR, fname)
-                with open(out, "w", encoding="utf-8") as fh:
+                with open(long_path(out), "w", encoding="utf-8") as fh:
                     fh.write(html)
                 print(f"  Saved -> {out}")
                 outputs_opened.append(out)

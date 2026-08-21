@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from lib.event.winpath import long_path
+
 _NO_LIMIT    = 1e100
 _SPEC_LABELS = {"Tests#", "Patterns", "Unit", "HighL", "LowL"}
 
@@ -31,7 +33,8 @@ _LOW_COLOUR  = "#d62728"
 _HIGH_COLOUR = "#2ca02c"
 
 # ── Paths used by main() ───────────────────────────────────────────────────────
-_BASE_DIR    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# This file lives at <project_root>/src/lib/event/Boxplot.py -- up 4 levels to root.
+_BASE_DIR    = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 _RESULT_DIR  = os.path.join(_BASE_DIR, "result")
 _SUMMARY_CSV = os.path.join(_RESULT_DIR, "GuLog_FailedSummary.csv")
 _CF_CSV      = os.path.join(_RESULT_DIR, "GuCorrFactor_ALL_CONCAT.csv")
@@ -79,7 +82,7 @@ class BoxplotGenerator:
         for lot_id in lot_ids:
             for json_path in self.header_folder.glob("*.json"):
                 if lot_id in json_path.stem:
-                    with open(json_path, "r", encoding="utf-8") as f:
+                    with open(long_path(str(json_path)), "r", encoding="utf-8") as f:
                         header = json.load(f)
                     mapping[lot_id] = (
                         header.get("Site details", {}).get("Handler ID", "N/A")
@@ -95,7 +98,7 @@ class BoxplotGenerator:
 
     def first_parameter(self, prefix: str = "PR_") -> str:
         """Returns the first parameter column whose name starts with prefix."""
-        with open(self.concat_csv, "r", encoding="utf-8-sig", errors="replace") as f:
+        with open(long_path(str(self.concat_csv)), "r", encoding="utf-8-sig", errors="replace") as f:
             for row in csv.reader(f):
                 if row and row[0].strip() == "Parameter":
                     for col in row[1:]:
@@ -122,7 +125,7 @@ class BoxplotGenerator:
         low_limit:   float | None                     = None
         groups:      dict[tuple, list[float]]         = {}
 
-        with open(self.concat_csv, "r", encoding="utf-8-sig", errors="replace") as f:
+        with open(long_path(str(self.concat_csv)), "r", encoding="utf-8-sig", errors="replace") as f:
             for row in csv.reader(f):
                 if not row:
                     continue
@@ -308,7 +311,7 @@ class BoxplotGenerator:
         import matplotlib.pyplot as plt
         import matplotlib.gridspec as gridspec
 
-        self.output_folder.mkdir(parents=True, exist_ok=True)
+        os.makedirs(long_path(str(self.output_folder)), exist_ok=True)
         random.seed(42)
 
         if param_name is None:
@@ -448,7 +451,7 @@ class BoxplotGenerator:
             output_filename = f"{safe}.png"
 
         out_path = self.output_folder / output_filename
-        plt.savefig(out_path, dpi=150, bbox_inches="tight", facecolor="white")
+        plt.savefig(long_path(str(out_path)), dpi=150, bbox_inches="tight", facecolor="white")
         plt.close(fig)
 
         counts = {f"{k[0]}|s{k[1]}|arm{k[2]}": len(groups[k]) for k in sorted_keys}
@@ -462,10 +465,10 @@ class BoxplotGenerator:
 
 def _load_concat_csv(path: str) -> pd.DataFrame:
     """Load a GuCorrFactor / GuVrfyError ALL_CONCAT CSV (rows 5+ are data)."""
-    if not os.path.exists(path):
+    if not os.path.exists(long_path(path)):
         print(f"  [WARN] File not found: {os.path.basename(path)}")
         return pd.DataFrame()
-    with open(path, encoding="utf-8", errors="replace") as f:
+    with open(long_path(path), encoding="utf-8", errors="replace") as f:
         rows = list(csv.reader(f))
     if len(rows) < 6:
         print(f"  [WARN] Too few rows in {os.path.basename(path)}")
@@ -1053,18 +1056,18 @@ def _build_box_page(
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    if not os.path.exists(_SUMMARY_CSV):
+    if not os.path.exists(long_path(_SUMMARY_CSV)):
         print(f"ERROR: {_SUMMARY_CSV} not found.\nRun main.py first to generate result files.")
         sys.exit(1)
 
-    with open(_SUMMARY_CSV, encoding="utf-8") as f:
+    with open(long_path(_SUMMARY_CSV), encoding="utf-8") as f:
         peek = f.readline().strip()
 
     if peek.startswith("All Pass"):
         print("GuLog_FailedSummary.csv reports All Pass -- nothing to plot.")
         sys.exit(0)
 
-    summary_df = pd.read_csv(_SUMMARY_CSV)
+    summary_df = pd.read_csv(long_path(_SUMMARY_CSV))
 
     param_specs = (
         summary_df
@@ -1102,7 +1105,7 @@ def main():
     if not vr_df.empty:
         print(f"  GuRawData       : {len(vr_df):,} data rows")
 
-    os.makedirs(_BOXPLOT_DIR, exist_ok=True)
+    os.makedirs(long_path(_BOXPLOT_DIR), exist_ok=True)
 
     outputs = []
 
@@ -1121,7 +1124,7 @@ def main():
             if html is not None:
                 out_path = os.path.join(_BOXPLOT_DIR,
                                         f"FailedParams_{tag}_BoxPlot_p{page_i:02d}.html")
-                with open(out_path, "w", encoding="utf-8") as fh:
+                with open(long_path(out_path), "w", encoding="utf-8") as fh:
                     fh.write(html)
                 print(f"  Saved -> {out_path}\n")
                 outputs.append(out_path)
